@@ -1,0 +1,13 @@
+services:
+  finflow:
+    build: .
+    container_name: finflow
+    ports:
+      - "127.0.0.1:${PORT:-5000}:5000"
+    environment:
+      DATABASE_PATH: /app/instance/finance.db
+      SECRET_KEY: ${SECRET_KEY:-local-finance-secret}
+      SEED_DEMO: ${SEED_DEMO:-0}
+    volumes:
+      - ./instance:/app/instance
+    restart: unless-stopped
