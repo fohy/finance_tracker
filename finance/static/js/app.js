@@ -15,6 +15,9 @@
 
     async function api(url, options = {}) {
         const config = { ...options, headers: { ...(options.headers || {}) } };
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes((config.method || 'GET').toUpperCase())) {
+            config.headers['X-CSRF-Token'] = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        }
         if (config.body && typeof config.body !== 'string') {
             config.headers['Content-Type'] = 'application/json';
             config.body = JSON.stringify(config.body);
@@ -223,9 +226,10 @@
     async function loadDashboard() {
         const query = new URLSearchParams({ period: state.period, anchor: state.anchor });
         if (state.personId) query.set('person_id', state.personId);
-        const [data, tx] = await Promise.all([
+        const [data, tx, budgets] = await Promise.all([
             api(`/api/summary?${query}`),
             api(`/api/transactions?${query}&per_page=6`),
+            api(`/api/budgets?anchor=${state.anchor}`),
         ]);
         setPeriodLabel(data);
         const current = data.current;
@@ -251,6 +255,7 @@
         $('#forecastInvested').textContent = money(data.forecast.invested);
         drawLineChart($('#trendChart'), data.trend);
         renderCategories(data.breakdown);
+        renderBudgets(budgets, $('#budgetOverview'));
         $('#recentTransactions').innerHTML = tx.items.length ? tx.items.map(transactionRow).join('') : '<div class="empty-state">Операций за период нет</div>';
     }
 
@@ -269,11 +274,21 @@
         }).join('');
     }
 
+    function renderBudgets(items, container) {
+        if (!container) return;
+        if (!items.length) { container.innerHTML = '<div class="empty-state">Добавьте лимиты в настройках</div>'; return; }
+        container.innerHTML = items.slice(0, 5).map(item => `<div class="category-row"><div class="category-icon">${escapeHtml(item.icon)}</div><div><div class="category-name"><span>${escapeHtml(item.name)}</span><span>${money(item.spent)} / ${money(item.monthly_limit)}</span></div><div class="progress-track"><i style="width:${Math.min(100, item.progress)}%;background:${item.status === 'over' ? 'var(--red)' : item.status === 'warning' ? 'var(--yellow)' : 'var(--green)'}"></i></div></div><strong>${item.progress.toFixed(0)}%</strong></div>`).join('');
+    }
+
     async function loadTransactions() {
         const query = new URLSearchParams({ period: state.period, anchor: state.anchor, page: state.txPage, per_page: 20 });
         if (state.personId) query.set('person_id', state.personId);
         const type = $('#txTypeFilter')?.value;
         if (type) query.set('type', type);
+        const search = $('#txSearch')?.value.trim();
+        if (search) query.set('q', search);
+        const exportLink = $('#exportTransactions');
+        if (exportLink) exportLink.href = `/api/transactions/export.csv?period=${state.period}&anchor=${state.anchor}`;
         const [summary, data] = await Promise.all([api(`/api/summary?${query}`), api(`/api/transactions?${query}`)]);
         setPeriodLabel(summary);
         const tbody = $('#transactionsTable');
@@ -287,10 +302,12 @@
                 <td>${item.person_name ? `<span class="person-pill" style="--avatar:${escapeHtml(item.avatar_color)}"><i>${escapeHtml(item.person_name[0])}</i>${escapeHtml(item.person_name)}</span>` : '—'}</td>
                 <td>${escapeHtml(item.account_name || '—')}${item.target_account_name ? `<div class="subtext">→ ${escapeHtml(item.target_account_name)}</div>` : ''}</td>
                 <td class="align-right"><strong class="tx-amount ${item.tx_type}">${prefix}${money(item.amount)}</strong></td>
-                <td>${item.tx_type !== 'interest' ? `<button class="delete-btn" data-delete-tx="${item.id}" title="Удалить">×</button>` : ''}</td>
+                <td>${item.tx_type !== 'interest' ? `<button class="delete-btn" data-edit-tx="${item.id}" data-date="${item.tx_date}" data-note="${escapeHtml(item.note || '')}" title="Исправить заметку или дату">✎</button><button class="delete-btn" data-duplicate-tx="${item.id}" title="Дублировать">⧉</button><button class="delete-btn" data-delete-tx="${item.id}" title="Удалить">×</button>` : ''}</td>
             </tr>`;
         }).join('') : '<tr><td colspan="7"><div class="empty-state">За этот период операций нет</div></td></tr>';
         $$('[data-delete-tx]').forEach(btn => btn.addEventListener('click', () => deleteTransaction(btn.dataset.deleteTx)));
+        $$('[data-duplicate-tx]').forEach(btn => btn.addEventListener('click', () => duplicateTransaction(btn.dataset.duplicateTx)));
+        $$('[data-edit-tx]').forEach(btn => btn.addEventListener('click', () => editTransaction(btn.dataset.editTx, btn.dataset.date, btn.dataset.note)));
         renderPagination(data);
     }
 
@@ -309,6 +326,15 @@
             await refreshBootstrap();
             loadTransactions();
         } catch (error) { toast(error.message, 'error'); }
+    }
+
+    async function duplicateTransaction(id) {
+        try { await api(`/api/transactions/${id}/duplicate`, { method: 'POST' }); toast('Операция продублирована на сегодня'); await refreshBootstrap(); loadTransactions(); }
+        catch (error) { toast(error.message, 'error'); }
+    }
+
+    function editTransaction(id, txDate, note) {
+        openEntityForm('Исправить операцию', `<label>Дата<input name="tx_date" type="date" value="${escapeHtml(txDate)}" required></label><label>Заметка<textarea name="note">${escapeHtml(note)}</textarea></label>`, async data => { try { await api(`/api/transactions/${id}`, { method: 'PATCH', body: data }); toast('Операция обновлена'); closeModals(); loadTransactions(); } catch (error) { toast(error.message, 'error'); } });
     }
 
     function openEntityForm(title, body, onSubmit) {
@@ -468,6 +494,26 @@
                 catch (error) { toast(error.message, 'error'); }
             });
         }
+        const budgets = await api('/api/budgets');
+        const budgetCard = $('#budgetSettings');
+        if (budgetCard) {
+            budgetCard.innerHTML = budgets.length ? budgets.map(item => `<div class="category-row"><span>${escapeHtml(item.icon)} ${escapeHtml(item.name)}</span><strong>${money(item.monthly_limit)}</strong><button class="btn btn-ghost" data-remove-budget="${item.category_id}">×</button></div>`).join('') : '<p class="muted">Лимитов пока нет.</p>';
+            $$('[data-remove-budget]', budgetCard).forEach(btn => btn.addEventListener('click', async () => { await api(`/api/budgets/${btn.dataset.removeBudget}`, { method: 'DELETE' }); loadSettings(); }));
+        }
+        $('#addBudgetBtn')?.addEventListener('click', () => openEntityForm('Лимит категории', `<label>Категория<select name="category_id">${categoryOptions('expense')}</select></label><label>Лимит в месяц<input name="monthly_limit" type="number" min="1" required></label>`, async data => { await api(`/api/budgets/${data.category_id}`, { method: 'PUT', body: data }); closeModals(); loadSettings(); }));
+    }
+
+    async function loadRecurring() {
+        const items = await api('/api/recurring-transactions');
+        const container = $('#recurringList');
+        if (!container) return;
+        container.innerHTML = items.length ? items.map(item => `<article class="card entity-card"><div class="card-kicker">${escapeHtml(item.frequency === 'monthly' ? 'Ежемесячно' : 'Еженедельно')} · ${escapeHtml(item.tx_type)}</div><h3>${escapeHtml(item.title)}</h3><div class="entity-amount">${money(item.amount)}</div><p class="muted">Следующая дата: ${formatDate(item.next_date)} · ${escapeHtml(item.category_name || item.account_name)}</p><div class="entity-footer"><button class="btn btn-secondary" data-apply-recurring="${item.id}" ${item.is_active ? '' : 'disabled'}>Провести</button><button class="btn btn-ghost" data-toggle-recurring="${item.id}" data-active="${item.is_active}">${item.is_active ? 'Пауза' : 'Включить'}</button></div></article>`).join('') : '<div class="empty-state">Добавьте зарплату, аренду или подписку</div>';
+        $$('[data-apply-recurring]').forEach(btn => btn.addEventListener('click', async () => { try { await api(`/api/recurring-transactions/${btn.dataset.applyRecurring}/apply`, { method: 'POST' }); toast('Операция проведена'); await refreshBootstrap(); loadRecurring(); } catch (error) { toast(error.message, 'error'); } }));
+        $$('[data-toggle-recurring]').forEach(btn => btn.addEventListener('click', async () => { await api(`/api/recurring-transactions/${btn.dataset.toggleRecurring}`, { method: 'PATCH', body: { is_active: btn.dataset.active !== '1' } }); loadRecurring(); }));
+    }
+
+    function openRecurringForm() {
+        openEntityForm('Регулярная операция', `<label>Название<input name="title" required placeholder="Например: аренда"></label><label>Тип<select name="tx_type"><option value="expense">Расход</option><option value="income">Доход</option><option value="transfer">Инвестиции</option></select></label><label>Сумма<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Повтор<select name="frequency"><option value="monthly">Ежемесячно</option><option value="weekly">Еженедельно</option></select></label><label>Первая дата<input name="next_date" type="date" value="${state.bootstrap.today}" required></label><label>Категория<select name="category_id">${categoryOptions('expense')}</select></label><label>Кто<select name="person_id">${personOptions(false)}</select></label><label>Счёт<select name="account_id">${accountOptions('life')}</select></label><label>Заметка<textarea name="note"></textarea></label>`, async data => { await api('/api/recurring-transactions', { method: 'POST', body: data }); closeModals(); loadRecurring(); });
     }
 
     async function refreshBootstrap() {
@@ -498,6 +544,7 @@
                 goals: loadGoals,
                 people: loadPeople,
                 settings: loadSettings,
+                recurring: loadRecurring,
             };
             await loaders[state.page]?.();
         } catch (error) {
@@ -516,6 +563,8 @@
             $('#addCategoryBtn')?.addEventListener('click', openCategoryForm);
             $('#addPurchaseBtn')?.addEventListener('click', openPurchaseForm);
             $('#addGoalBtn')?.addEventListener('click', openGoalForm);
+            $('#addRecurringBtn')?.addEventListener('click', openRecurringForm);
+            $('#txSearch')?.addEventListener('input', () => { state.txPage = 1; loadTransactions(); });
             await loadCurrentPage();
         } catch (error) {
             console.error(error);

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card table-card">
+    <div class="card-header table-tools"><div><div class="card-kicker">Автоматизация</div><h3>Регулярные операции</h3></div><button class="btn btn-primary" id="addRecurringBtn">＋ Правило</button></div>
+    <p class="muted">Создайте зарплату, аренду или подписку. В день оплаты нажмите «Провести» — правило перенесёт дату на следующий период.</p>
+    <div id="recurringList" class="entity-grid"></div>
+</div>
+{% endblock %}

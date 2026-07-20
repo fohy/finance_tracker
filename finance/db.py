@@ -16,6 +16,24 @@ CREATE TABLE IF NOT EXISTS people (
     avatar_color TEXT NOT NULL DEFAULT '#7c5cff'
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    person_id INTEGER NOT NULL UNIQUE REFERENCES people(id) ON DELETE RESTRICT,
+    is_admin INTEGER NOT NULL DEFAULT 0 CHECK(is_admin IN (0, 1)),
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    login TEXT NOT NULL,
+    succeeded INTEGER NOT NULL CHECK(succeeded IN (0, 1)),
+    remote_addr TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -78,6 +96,29 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS category_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER NOT NULL UNIQUE REFERENCES categories(id) ON DELETE CASCADE,
+    monthly_limit REAL NOT NULL CHECK(monthly_limit > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS recurring_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    tx_type TEXT NOT NULL CHECK(tx_type IN ('income', 'expense', 'transfer')),
+    amount REAL NOT NULL CHECK(amount > 0),
+    frequency TEXT NOT NULL CHECK(frequency IN ('weekly', 'monthly')),
+    next_date TEXT NOT NULL,
+    category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+    person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    target_account_id INTEGER REFERENCES accounts(id) ON DELETE RESTRICT,
+    note TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     action TEXT NOT NULL,
@@ -91,6 +132,8 @@ CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(tx_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_person ON transactions(person_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(tx_type);
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_login_time ON login_attempts(login, created_at);
+CREATE INDEX IF NOT EXISTS idx_recurring_next_date ON recurring_transactions(next_date, is_active);
 """
 
 
@@ -121,6 +164,7 @@ def _insert_many(db: sqlite3.Connection, sql: str, rows: Iterator[tuple]) -> Non
 def init_db(seed_demo: bool = True) -> None:
     db = get_db()
     db.executescript(SCHEMA)
+    _apply_compatible_schema_changes(db)
 
     if db.execute("SELECT COUNT(*) FROM people").fetchone()[0] == 0:
         db.executemany(
@@ -178,6 +222,13 @@ def init_db(seed_demo: bool = True) -> None:
         _seed_demo(db)
 
     db.commit()
+
+
+def _apply_compatible_schema_changes(db: sqlite3.Connection) -> None:
+    """Apply small additive changes for databases created before migrations existed."""
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(audit_log)")}
+    if "actor_user_id" not in columns:
+        db.execute("ALTER TABLE audit_log ADD COLUMN actor_user_id INTEGER REFERENCES users(id)")
 
 
 def _seed_demo(db: sqlite3.Connection) -> None:

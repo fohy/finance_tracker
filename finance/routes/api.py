@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-from datetime import date
+import csv
+from calendar import monthrange
+from datetime import date, timedelta
+from io import StringIO
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
+from ..auth import current_user_id
 from ..db import get_db
 from ..errors import NotFoundError
 from ..services import (
     accrue_interest,
     available_for_purchases,
     category_breakdown,
+    category_budget_status,
     get_summary,
     goal_progress,
+    parse_date,
     period_bounds,
     purchase_plan,
     shift_period,
@@ -20,6 +26,7 @@ from ..services import (
 )
 from ..transaction_service import create_transaction as create_transaction_record
 from ..transaction_service import delete_transaction as delete_transaction_record
+from ..transaction_service import update_transaction_metadata
 
 api_bp = Blueprint("api", __name__)
 
@@ -98,6 +105,12 @@ def list_transactions():
     page = max(1, int(request.args.get("page", 1)))
     per_page = min(100, max(1, int(request.args.get("per_page", 20))))
     start, end = period_bounds(period, anchor)
+    if request.args.get("from"):
+        start = parse_date(request.args["from"])
+    if request.args.get("to"):
+        end = parse_date(request.args["to"])
+    if start > end:
+        raise ValueError("Начальная дата позже конечной")
 
     filters = ["t.tx_date BETWEEN ? AND ?"]
     params: list[Any] = [start.isoformat(), end.isoformat()]
@@ -105,8 +118,18 @@ def list_transactions():
         filters.append("t.person_id = ?")
         params.append(person_id)
     if tx_type:
+        if tx_type not in {"income", "expense", "transfer", "interest"}:
+            raise ValueError("Неверный тип операции")
         filters.append("t.tx_type = ?")
         params.append(tx_type)
+    category_id = as_int_or_none(request.args.get("category_id"))
+    if category_id:
+        filters.append("t.category_id = ?")
+        params.append(category_id)
+    search = str(request.args.get("q") or "").strip()
+    if search:
+        filters.append("(t.note LIKE ? OR c.name LIKE ?)")
+        params.extend([f"%{search}%", f"%{search}%"])
     where = " AND ".join(filters)
 
     total = db.execute(f"SELECT COUNT(*) FROM transactions t WHERE {where}", params).fetchone()[0]
@@ -133,6 +156,60 @@ def list_transactions():
     })
 
 
+@api_bp.patch("/transactions/<int:tx_id>")
+def update_transaction(tx_id: int):
+    data = payload()
+    update_transaction_metadata(
+        tx_id,
+        tx_date=data.get("tx_date"),
+        note=data.get("note"),
+        person_id=as_int_or_none(data.get("person_id")) if "person_id" in data else None,
+        category_id=as_int_or_none(data.get("category_id")) if "category_id" in data else None,
+        actor_user_id=current_user_id(),
+    )
+    return ok()
+
+
+@api_bp.post("/transactions/<int:tx_id>/duplicate")
+def duplicate_transaction(tx_id: int):
+    row = get_db().execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
+    if not row:
+        return fail("Операция не найдена", 404)
+    if row["tx_type"] == "interest":
+        raise ValueError("Автоматическое начисление нельзя дублировать")
+    transaction_id = create_transaction_record(
+        tx_type=row["tx_type"], amount=float(row["amount"]), tx_date=date.today().isoformat(),
+        account_id=row["account_id"], target_account_id=row["target_account_id"],
+        category_id=row["category_id"], person_id=row["person_id"], note=row["note"],
+        actor_user_id=current_user_id(),
+    )
+    return ok({"id": transaction_id}, 201)
+
+
+@api_bp.get("/transactions/export.csv")
+def export_transactions():
+    period = request.args.get("period", "month")
+    start, end = period_bounds(period, request.args.get("anchor"))
+    rows = get_db().execute(
+        """SELECT t.tx_date, t.tx_type, t.amount, c.name category, p.name person,
+                   a.name account, ta.name target_account, t.note
+           FROM transactions t
+           LEFT JOIN categories c ON c.id = t.category_id
+           LEFT JOIN people p ON p.id = t.person_id
+           JOIN accounts a ON a.id = t.account_id
+           LEFT JOIN accounts ta ON ta.id = t.target_account_id
+           WHERE t.tx_date BETWEEN ? AND ? ORDER BY t.tx_date, t.id""",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall()
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Дата", "Тип", "Сумма", "Категория", "Участник", "Счёт", "Счёт назначения", "Заметка"])
+    writer.writerows([list(row) for row in rows])
+    return Response("\ufeff" + output.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": "attachment; filename=finflow-transactions.csv"
+    })
+
+
 @api_bp.post("/transactions")
 def create_transaction():
     data = payload()
@@ -150,14 +227,14 @@ def create_transaction():
     transaction_id = create_transaction_record(
         tx_type=tx_type, amount=amount, tx_date=tx_date, account_id=account_id,
         target_account_id=target_account_id, category_id=category_id,
-        person_id=person_id, note=note,
+        person_id=person_id, note=note, actor_user_id=current_user_id(),
     )
     return ok({"id": transaction_id}, 201)
 
 
 @api_bp.delete("/transactions/<int:tx_id>")
 def delete_transaction(tx_id: int):
-    delete_transaction_record(tx_id)
+    delete_transaction_record(tx_id, actor_user_id=current_user_id())
     return ok()
 
 
@@ -364,3 +441,121 @@ def update_settings():
             )
     db.commit()
     return ok()
+
+
+@api_bp.get("/budgets")
+def list_budgets():
+    return ok(category_budget_status(request.args.get("anchor")))
+
+
+@api_bp.put("/budgets/<int:category_id>")
+def save_budget(category_id: int):
+    limit = as_float(payload().get("monthly_limit"), "Месячный лимит")
+    db = get_db()
+    category = db.execute("SELECT type FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if not category:
+        return fail("Категория не найдена", 404)
+    if category["type"] != "expense":
+        raise ValueError("Лимит можно задать только для расходной категории")
+    db.execute(
+        """INSERT INTO category_budgets(category_id, monthly_limit) VALUES (?, ?)
+           ON CONFLICT(category_id) DO UPDATE SET monthly_limit = excluded.monthly_limit""",
+        (category_id, limit),
+    )
+    db.commit()
+    return ok()
+
+
+@api_bp.delete("/budgets/<int:category_id>")
+def delete_budget(category_id: int):
+    get_db().execute("DELETE FROM category_budgets WHERE category_id = ?", (category_id,))
+    get_db().commit()
+    return ok()
+
+
+def _next_recurrence_date(value: str, frequency: str) -> str:
+    current = parse_date(value)
+    if frequency == "weekly":
+        return (current + timedelta(days=7)).isoformat()
+    month = current.month % 12 + 1
+    year = current.year + (current.month // 12)
+    return current.replace(year=year, month=month, day=min(current.day, monthrange(year, month)[1])).isoformat()
+
+
+@api_bp.get("/recurring-transactions")
+def list_recurring_transactions():
+    rows = get_db().execute(
+        """SELECT r.*, c.name category_name, p.name person_name, a.name account_name
+           FROM recurring_transactions r
+           LEFT JOIN categories c ON c.id = r.category_id
+           LEFT JOIN people p ON p.id = r.person_id
+           JOIN accounts a ON a.id = r.account_id
+           ORDER BY r.is_active DESC, r.next_date, r.id"""
+    ).fetchall()
+    return ok([dict(row) for row in rows])
+
+
+@api_bp.post("/recurring-transactions")
+def create_recurring_transaction():
+    data = payload()
+    title = str(data.get("title") or "").strip()
+    tx_type = data.get("tx_type")
+    frequency = data.get("frequency")
+    if not title:
+        raise ValueError("Введите название регулярной операции")
+    if tx_type not in {"income", "expense", "transfer"} or frequency not in {"weekly", "monthly"}:
+        raise ValueError("Неверный тип операции или периодичность")
+    db = get_db()
+    cursor = db.execute(
+        """INSERT INTO recurring_transactions(title, tx_type, amount, frequency, next_date, category_id,
+                   person_id, account_id, target_account_id, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (title, tx_type, as_float(data.get("amount"), "Сумма"), frequency,
+         parse_date(data.get("next_date")).isoformat(), as_int_or_none(data.get("category_id")),
+         as_int_or_none(data.get("person_id")), int(data.get("account_id")),
+         as_int_or_none(data.get("target_account_id")), str(data.get("note") or "").strip()),
+    )
+    db.commit()
+    return ok({"id": cursor.lastrowid}, 201)
+
+
+@api_bp.post("/recurring-transactions/<int:item_id>/apply")
+def apply_recurring_transaction(item_id: int):
+    db = get_db()
+    row = db.execute("SELECT * FROM recurring_transactions WHERE id = ? AND is_active = 1", (item_id,)).fetchone()
+    if not row:
+        return fail("Активное регулярное правило не найдено", 404)
+    if parse_date(row["next_date"]) > date.today():
+        raise ValueError("Дата следующей операции ещё не наступила")
+    transaction_id = create_transaction_record(
+        tx_type=row["tx_type"], amount=float(row["amount"]), tx_date=row["next_date"],
+        account_id=row["account_id"], target_account_id=row["target_account_id"], category_id=row["category_id"],
+        person_id=row["person_id"], note=row["note"] or row["title"], actor_user_id=current_user_id(),
+    )
+    db.execute("UPDATE recurring_transactions SET next_date = ? WHERE id = ?", (_next_recurrence_date(row["next_date"], row["frequency"]), item_id))
+    db.commit()
+    return ok({"id": transaction_id})
+
+
+@api_bp.patch("/recurring-transactions/<int:item_id>")
+def update_recurring_transaction(item_id: int):
+    data = payload()
+    if "is_active" not in data:
+        raise ValueError("Можно изменить только активность правила")
+    active = str(data["is_active"]).lower() in {"1", "true", "yes"}
+    cursor = get_db().execute("UPDATE recurring_transactions SET is_active = ? WHERE id = ?", (int(active), item_id))
+    if cursor.rowcount == 0:
+        get_db().rollback()
+        return fail("Регулярное правило не найдено", 404)
+    get_db().commit()
+    return ok()
+
+
+@api_bp.get("/activity")
+def activity():
+    rows = get_db().execute(
+        """SELECT l.*, u.login actor_login FROM audit_log l
+           LEFT JOIN users u ON u.id = l.actor_user_id
+           ORDER BY l.created_at DESC, l.id DESC LIMIT 50"""
+    ).fetchall()
+    return ok([dict(row) for row in rows])

@@ -36,3 +36,8 @@ def people():
 @pages_bp.get("/settings")
 def settings():
     return render_template("settings.html", page="settings", title="Настройки")
+
+
+@pages_bp.get("/recurring")
+def recurring():
+    return render_template("recurring.html", page="recurring", title="Регулярные операции")

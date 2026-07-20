@@ -309,3 +309,31 @@ def goal_progress(item: dict[str, Any]) -> dict[str, Any]:
         "monthly_needed": round(remaining / max(1, days / 30.44), 2),
         "progress": round(min(100, float(item["current_amount"]) / max(float(item["target_amount"]), 1) * 100), 1),
     }
+
+
+def category_budget_status(anchor: str | None = None) -> list[dict[str, Any]]:
+    """Return monthly category limits with actual spending and an actionable status."""
+    current = parse_date(anchor)
+    start = current.replace(day=1).isoformat()
+    end = current.replace(day=monthrange(current.year, current.month)[1]).isoformat()
+    rows = get_db().execute(
+        """SELECT b.id, b.category_id, b.monthly_limit, c.name, c.icon, c.color,
+            COALESCE(SUM(t.amount), 0) spent
+           FROM category_budgets b
+           JOIN categories c ON c.id = b.category_id
+           LEFT JOIN transactions t ON t.category_id = b.category_id
+               AND t.tx_type = 'expense' AND t.tx_date BETWEEN ? AND ?
+           GROUP BY b.id, b.category_id, b.monthly_limit, c.name, c.icon, c.color
+           ORDER BY (COALESCE(SUM(t.amount), 0) / b.monthly_limit) DESC""",
+        (start, end),
+    ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["spent"] = round(float(item["spent"]), 2)
+        item["monthly_limit"] = round(float(item["monthly_limit"]), 2)
+        item["remaining"] = round(item["monthly_limit"] - item["spent"], 2)
+        item["progress"] = round(item["spent"] / item["monthly_limit"] * 100, 1)
+        item["status"] = "over" if item["progress"] > 100 else "warning" if item["progress"] >= 80 else "ok"
+        result.append(item)
+    return result

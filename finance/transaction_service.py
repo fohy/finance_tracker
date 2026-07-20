@@ -41,6 +41,7 @@ def create_transaction(
     category_id: int | None,
     person_id: int | None,
     note: str,
+    actor_user_id: int | None = None,
 ) -> int:
     if tx_type not in USER_TRANSACTION_TYPES:
         raise DomainError("Неверный тип операции")
@@ -73,8 +74,9 @@ def create_transaction(
         if tx_type == "transfer":
             db.execute("UPDATE accounts SET balance = ROUND(balance + ?, 2) WHERE id = ?", (amount, target_account_id))
         db.execute(
-            "INSERT INTO audit_log(action, entity_type, entity_id, details) VALUES (?, ?, ?, ?)",
-            ("created", "transaction", cursor.lastrowid, tx_type),
+            """INSERT INTO audit_log(action, entity_type, entity_id, details, actor_user_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("created", "transaction", cursor.lastrowid, tx_type, actor_user_id),
         )
         db.commit()
     except Exception:
@@ -83,7 +85,7 @@ def create_transaction(
     return int(cursor.lastrowid)
 
 
-def delete_transaction(tx_id: int) -> None:
+def delete_transaction(tx_id: int, actor_user_id: int | None = None) -> None:
     db = get_db()
     row = db.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
     if not row:
@@ -96,7 +98,52 @@ def delete_transaction(tx_id: int) -> None:
         if row["tx_type"] == "transfer":
             db.execute("UPDATE accounts SET balance = ROUND(balance - ?, 2) WHERE id = ?", (row["amount"], row["target_account_id"]))
         db.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
-        db.execute("INSERT INTO audit_log(action, entity_type, entity_id) VALUES (?, ?, ?)", ("deleted", "transaction", tx_id))
+        db.execute(
+            """INSERT INTO audit_log(action, entity_type, entity_id, actor_user_id)
+               VALUES (?, ?, ?, ?)""",
+            ("deleted", "transaction", tx_id, actor_user_id),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def update_transaction_metadata(
+    tx_id: int, *, tx_date: str | None, note: str | None, person_id: int | None, category_id: int | None,
+    actor_user_id: int | None = None,
+) -> None:
+    """Edit non-balance fields without ever rewriting the financial ledger."""
+    db = get_db()
+    row = db.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
+    if not row:
+        raise NotFoundError("Операция не найдена")
+    if row["tx_type"] == "interest":
+        raise DomainError("Автоматическое начисление нельзя редактировать вручную")
+    updates: dict[str, object] = {}
+    if tx_date is not None:
+        updates["tx_date"] = _validate_date(tx_date)
+    if note is not None:
+        updates["note"] = note.strip()
+    if person_id is not None:
+        _require_entity("people", person_id, "Участник")
+        updates["person_id"] = person_id
+    if category_id is not None:
+        _require_entity("categories", category_id, "Категория")
+        category = db.execute("SELECT type FROM categories WHERE id = ?", (category_id,)).fetchone()
+        if category["type"] != row["tx_type"]:
+            raise DomainError("Тип категории не соответствует типу операции")
+        updates["category_id"] = category_id
+    if not updates:
+        raise DomainError("Нет полей для изменения")
+    try:
+        assignments = ", ".join(f"{field} = ?" for field in updates)
+        db.execute(f"UPDATE transactions SET {assignments} WHERE id = ?", [*updates.values(), tx_id])
+        db.execute(
+            """INSERT INTO audit_log(action, entity_type, entity_id, details, actor_user_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("updated", "transaction", tx_id, ",".join(updates), actor_user_id),
+        )
         db.commit()
     except Exception:
         db.rollback()

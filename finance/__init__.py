@@ -2,6 +2,8 @@ from collections.abc import Mapping
 
 from flask import Flask
 
+from .auth import init_auth
+from .cli import init_cli
 from .config import Config
 from .db import init_app, init_db
 
@@ -18,10 +20,14 @@ def create_app(test_config: Mapping[str, object] | None = None) -> Flask:
         app.config.update(test_config)
 
     init_app(app)
+    init_auth(app)
+    init_cli(app)
 
     from .routes.api import api_bp
+    from .routes.auth import auth_bp
     from .routes.pages import pages_bp
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(pages_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
 

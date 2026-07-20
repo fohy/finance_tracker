@@ -11,5 +11,5 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 
 echo
-printf 'FinFlow is running at http://127.0.0.1:5000\nPress Ctrl+C to stop.\n\n'
+printf 'FinFlow is running at http://127.0.0.1:5050\nPress Ctrl+C to stop.\n\n'
 python app.py
