@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="period-toolbar">
+    <div class="segmented period-segment">
+        <button data-period="day">День</button>
+        <button data-period="week">Неделя</button>
+        <button data-period="month" class="active">Месяц</button>
+    </div>
+    <div class="date-navigator">
+        <button class="icon-btn" data-period-nav="prev">←</button>
+        <button class="date-label" id="periodLabel">—</button>
+        <button class="icon-btn" data-period-nav="next">→</button>
+    </div>
+    <select class="person-filter" id="personFilter"><option value="">Все вместе</option></select>
+</div>
+
+<div class="hero-grid">
+    <article class="card balance-hero">
+        <div class="card-kicker">Общий капитал</div>
+        <div class="hero-value" id="totalCapital">—</div>
+        <div class="hero-meta"><span id="capitalTrend" class="trend-chip">—</span><span>сумма жизненного и инвестиционного баланса</span></div>
+        <div class="balance-split">
+            <div><span>На жизнь</span><strong id="lifeBalance">—</strong></div>
+            <div><span>Инвестиции</span><strong id="investmentBalance">—</strong></div>
+        </div>
+    </article>
+    <article class="card score-card">
+        <div class="score-ring" id="scoreRing"><div><strong id="scoreValue">—</strong><span>/ 100</span></div></div>
+        <div class="score-copy"><div class="card-kicker">Индекс правильности</div><h3 id="scoreLabel">—</h3><p id="scoreTip">—</p></div>
+    </article>
+</div>
+
+<div class="metric-grid">
+    <article class="metric-card"><div class="metric-icon income">↗</div><div><span>Доходы</span><strong id="metricIncome">—</strong><small id="deltaIncome">—</small></div></article>
+    <article class="metric-card"><div class="metric-icon expense">↘</div><div><span>Расходы</span><strong id="metricExpense">—</strong><small id="deltaExpense">—</small></div></article>
+    <article class="metric-card"><div class="metric-icon net">=</div><div><span>Чистый результат</span><strong id="metricNet">—</strong><small id="deltaNet">—</small></div></article>
+    <article class="metric-card"><div class="metric-icon invest">◇</div><div><span>Инвестировано</span><strong id="metricInvested">—</strong><small id="deltaInvested">—</small></div></article>
+</div>
+
+<div class="dashboard-grid">
+    <article class="card chart-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Динамика</div><h3>Доходы, расходы и инвестиции</h3></div><div class="legend"><span class="income-dot">Доходы</span><span class="expense-dot">Расходы</span><span class="invest-dot">Инвестиции</span></div></div>
+        <div class="chart-wrap" id="trendChart"></div>
+    </article>
+    <article class="card category-card">
+        <div class="card-header"><div><div class="card-kicker">Структура</div><h3>Категории расходов</h3></div></div>
+        <div id="categoryBreakdown" class="category-list"></div>
+    </article>
+    <article class="card forecast-card">
+        <div class="card-header"><div><div class="card-kicker">Следующий месяц</div><h3>Прогноз по метрикам</h3></div><span class="ai-badge">умный расчёт</span></div>
+        <div class="forecast-grid">
+            <div><span>Доход</span><strong id="forecastIncome">—</strong></div>
+            <div><span>Расход</span><strong id="forecastExpense">—</strong></div>
+            <div><span>Свободный остаток</span><strong id="forecastNet">—</strong></div>
+            <div><span>Инвестиции</span><strong id="forecastInvested">—</strong></div>
+        </div>
+        <p class="muted">Прогноз строится по средним значениям последних трёх месяцев и обновляется после каждой операции.</p>
+    </article>
+    <article class="card recent-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Последние действия</div><h3>Операции за период</h3></div><a href="/transactions" class="text-link">Все операции →</a></div>
+        <div id="recentTransactions" class="transaction-list"></div>
+    </article>
+</div>
+{% endblock %}

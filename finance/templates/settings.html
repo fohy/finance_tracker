@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="settings-layout">
+    <form class="card settings-card" id="settingsForm">
+        <div class="card-header"><div><div class="card-kicker">Стратегия</div><h3>Финансовые ориентиры</h3></div></div>
+        <label>Целевая доля инвестиций, %<input type="number" name="investment_target_percent" min="0" max="100" step="0.1"><small>Используется в индексе правильности и плане покупок.</small></label>
+        <label>Месячный лимит расходов на жизнь<input type="number" name="monthly_life_budget" min="0" step="100"><small>Масштабируется для дня и недели автоматически.</small></label>
+        <label>Валюта<input type="text" name="currency" maxlength="3"><small>Сейчас интерфейс оптимизирован для рублей.</small></label>
+        <button class="btn btn-primary" type="submit">Сохранить настройки</button>
+    </form>
+    <article class="card settings-card">
+        <div class="card-header"><div><div class="card-kicker">Данные</div><h3>Локальное хранение</h3></div></div>
+        <div class="info-list"><div><span>База данных</span><strong>SQLite</strong></div><div><span>Передача в интернет</span><strong>Нет</strong></div><div><span>Автосохранение</span><strong>Включено</strong></div><div><span>Резервная копия</span><strong>Скопируйте instance/finance.db</strong></div></div>
+        <p class="muted">Все данные остаются на вашем компьютере. Для переноса проекта достаточно перенести ZIP и файл базы.</p>
+    </article>
+</div>
+{% endblock %}

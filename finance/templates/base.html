@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b0f19">
+    <title>{{ title }} · FinFlow</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body data-page="{{ page }}">
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="brand">
+            <div class="brand-mark">F</div>
+            <div>
+                <strong>FinFlow</strong>
+                <span>семейные финансы</span>
+            </div>
+        </div>
+        <nav class="nav-list">
+            <a class="nav-item {{ 'active' if page == 'dashboard' }}" href="/"><span>⌂</span>Обзор</a>
+            <a class="nav-item {{ 'active' if page == 'transactions' }}" href="/transactions"><span>⇄</span>Операции</a>
+            <a class="nav-item {{ 'active' if page == 'investments' }}" href="/investments"><span>↗</span>Инвестиции</a>
+            <a class="nav-item {{ 'active' if page == 'purchases' }}" href="/purchases"><span>🛍</span>Покупки</a>
+            <a class="nav-item {{ 'active' if page == 'goals' }}" href="/goals"><span>◎</span>Цели</a>
+            <a class="nav-item {{ 'active' if page == 'people' }}" href="/people"><span>♢</span>Саша и Настя</a>
+            <a class="nav-item {{ 'active' if page == 'settings' }}" href="/settings"><span>⚙</span>Настройки</a>
+        </nav>
+        <div class="sidebar-tip">
+            <div class="tip-icon">✦</div>
+            <strong>Финансовый компас</strong>
+            <p>Индекс показывает, насколько расходы и инвестиции соответствуют вашим целям.</p>
+        </div>
+    </aside>
+
+    <main class="main-area">
+        <header class="topbar">
+            <button class="icon-btn mobile-menu" id="mobileMenu" aria-label="Открыть меню">☰</button>
+            <div>
+                <div class="eyebrow">Локальный финансовый центр</div>
+                <h1>{{ title }}</h1>
+            </div>
+            <div class="topbar-actions">
+                <div class="sync-state"><span></span>Данные сохранены локально</div>
+                <button class="btn btn-primary" data-open-transaction>＋ Операция</button>
+            </div>
+        </header>
+
+        <section class="content">
+            {% block content %}{% endblock %}
+        </section>
+    </main>
+</div>
+
+<div class="modal-backdrop" id="transactionModal" aria-hidden="true">
+    <div class="modal-card modal-wide">
+        <div class="modal-head">
+            <div>
+                <div class="eyebrow">Новая запись</div>
+                <h2>Добавить операцию</h2>
+            </div>
+            <button class="icon-btn" data-close-modal>×</button>
+        </div>
+        <form id="transactionForm" class="form-grid">
+            <div class="segmented span-2" id="txTypeSegment">
+                <button type="button" class="active" data-tx-type="expense">Расход</button>
+                <button type="button" data-tx-type="income">Доход</button>
+                <button type="button" data-tx-type="transfer">В инвестиции</button>
+            </div>
+            <input type="hidden" name="tx_type" value="expense">
+            <label>Сумма
+                <div class="money-input"><input name="amount" type="number" min="0.01" step="0.01" required placeholder="0"><span>₽</span></div>
+            </label>
+            <label>Дата
+                <input name="tx_date" type="date" required>
+            </label>
+            <label id="categoryField">Категория
+                <select name="category_id" required></select>
+            </label>
+            <label>Кто
+                <select name="person_id"></select>
+            </label>
+            <label>Счёт
+                <select name="account_id" required></select>
+            </label>
+            <label id="targetAccountField" class="hidden">Куда перевести
+                <select name="target_account_id"></select>
+            </label>
+            <label class="span-2">Пометка
+                <textarea name="note" rows="3" placeholder="Например: продукты на неделю"></textarea>
+            </label>
+            <div class="modal-actions span-2">
+                <button type="button" class="btn btn-ghost" data-close-modal>Отмена</button>
+                <button type="submit" class="btn btn-primary">Сохранить операцию</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="entityModal" aria-hidden="true">
+    <div class="modal-card" id="entityModalContent"></div>
+</div>
+<div class="toast-stack" id="toastStack"></div>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
