@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" role="img" aria-labelledby="title desc">
+  <title id="title">Финансовый обзор FinFlow</title>
+  <desc id="desc">Спокойная редакционная композиция из полупрозрачных отчётов, графиков и аналитических сеток</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbf8ee" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#d9ddd2" stop-opacity=".06"/>
+    </linearGradient>
+    <linearGradient id="lavenderGlass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c8bee1" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#8f85a9" stop-opacity=".08"/>
+    </linearGradient>
+    <linearGradient id="dataWash" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#b8cf7e" stop-opacity="0"/>
+      <stop offset="1" stop-color="#b8cf7e" stop-opacity=".24"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#9aa294" stroke-opacity=".14" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="12" stdDeviation="13" flood-color="#151915" flood-opacity=".2"/>
+    </filter>
+    <clipPath id="reportClip">
+      <rect x="149" y="38" width="408" height="204" rx="18"/>
+    </clipPath>
+  </defs>
+
+  <rect x="1" y="1" width="718" height="278" rx="27" fill="url(#grid)" opacity=".72"/>
+  <path d="M26 205H694M103 22V258M626 22V258" fill="none" stroke="#8f978b" stroke-opacity=".13"/>
+  <ellipse cx="353" cy="239" rx="265" ry="20" fill="#1d211d" opacity=".12"/>
+
+  <g transform="rotate(4 105 152)" filter="url(#shadow)">
+    <rect x="35" y="82" width="154" height="150" rx="16" fill="#7f887d" fill-opacity=".13" stroke="#a7afa2" stroke-opacity=".28"/>
+    <path d="M55 110H120M55 121H102" stroke="#c4c9bf" stroke-opacity=".42" stroke-linecap="round"/>
+    <g fill="#b8cf7e">
+      <rect x="55" y="153" width="12" height="45" rx="3" opacity=".34"/>
+      <rect x="75" y="139" width="12" height="59" rx="3" opacity=".48"/>
+      <rect x="95" y="163" width="12" height="35" rx="3" opacity=".26"/>
+      <rect x="115" y="128" width="12" height="70" rx="3" opacity=".58"/>
+      <rect x="135" y="147" width="12" height="51" rx="3" opacity=".38"/>
+    </g>
+    <path d="M55 207H158" stroke="#b8beb4" stroke-opacity=".3"/>
+  </g>
+
+  <g transform="rotate(-2 353 140)" filter="url(#shadow)">
+    <rect x="149" y="38" width="408" height="204" rx="18" fill="url(#paper)" stroke="#b3baae" stroke-opacity=".36"/>
+    <g clip-path="url(#reportClip)">
+      <rect x="149" y="38" width="408" height="204" fill="url(#grid)" opacity=".7"/>
+      <path d="M149 82H557" stroke="#b8beb4" stroke-opacity=".24"/>
+      <path d="M180 61H245M472 61H525" stroke="#e1e2db" stroke-opacity=".45" stroke-linecap="round" stroke-width="3"/>
+      <path d="M181 186C213 175 234 181 260 160C288 138 311 166 341 143C372 119 394 137 421 112C447 89 473 120 524 78V220H181Z" fill="url(#dataWash)"/>
+      <g stroke="#aeb5aa" stroke-opacity=".18">
+        <path d="M181 102H526M181 134H526M181 166H526M181 198H526"/>
+        <path d="M229 90V211M277 90V211M325 90V211M373 90V211M421 90V211M469 90V211"/>
+      </g>
+      <path d="M181 186C213 175 234 181 260 160C288 138 311 166 341 143C372 119 394 137 421 112C447 89 473 120 524 78" fill="none" stroke="#b8cf7e" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/>
+      <g fill="#e6ebde" stroke="#7f8c71" stroke-width="2">
+        <circle cx="260" cy="160" r="4"/>
+        <circle cx="341" cy="143" r="4"/>
+        <circle cx="421" cy="112" r="4"/>
+        <circle cx="524" cy="78" r="4"/>
+      </g>
+      <g transform="translate(181 100)">
+        <rect width="66" height="5" rx="2.5" fill="#c7ccc3" fill-opacity=".28"/>
+        <rect y="14" width="39" height="5" rx="2.5" fill="#c7ccc3" fill-opacity=".18"/>
+      </g>
+    </g>
+  </g>
+
+  <g transform="rotate(3 592 120)" filter="url(#shadow)">
+    <rect x="500" y="25" width="170" height="188" rx="20" fill="url(#lavenderGlass)" stroke="#c1b8d5" stroke-opacity=".4"/>
+    <circle cx="585" cy="91" r="38" fill="none" stroke="#d8d3e2" stroke-opacity=".2" stroke-width="10"/>
+    <path d="M585 53a38 38 0 0 1 31 60" fill="none" stroke="#b8cf7e" stroke-opacity=".76" stroke-linecap="round" stroke-width="10"/>
+    <circle cx="585" cy="91" r="18" fill="#f4f0e6" fill-opacity=".07" stroke="#d8d3e2" stroke-opacity=".24"/>
+    <path d="M526 149H643M526 165H617M526 181H632" stroke="#e2dee8" stroke-opacity=".3" stroke-linecap="round"/>
+    <circle cx="528" cy="42" r="3" fill="#b8cf7e"/>
+    <path d="M539 42H573" stroke="#e2dee8" stroke-opacity=".32" stroke-linecap="round"/>
+  </g>
+
+  <g fill="none" stroke="#aeb6aa" stroke-opacity=".42">
+    <circle cx="78" cy="51" r="19"/>
+    <circle cx="78" cy="51" r="29" stroke-opacity=".16"/>
+    <path d="M50 51H106M78 23V79" stroke-opacity=".18"/>
+  </g>
+  <g fill="#b8cf7e">
+    <circle cx="112" cy="34" r="3" opacity=".75"/>
+    <circle cx="681" cy="239" r="3" opacity=".55"/>
+  </g>
+  <path d="M645 243h38M664 224v38" stroke="#aeb6aa" stroke-opacity=".22"/>
+</svg>

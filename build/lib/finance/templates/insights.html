@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-intro"><div><div class="card-kicker">Решения на основе данных</div><p>Подушка, отклонения, сценарии и недельный итог рассчитываются из операций и счетов без изменения данных.</p></div></div>
+<div class="feature-grid">
+    <article class="card feature-card">
+        <div class="card-header"><div><div class="card-kicker">Финансовая подушка</div><h3 id="cushionRunway">—</h3></div></div>
+        <div id="cushionDetails" class="compact-list"><div class="loading-state">Считаем запас…</div></div>
+    </article>
+    <article class="card feature-card">
+        <div class="card-header"><div><div class="card-kicker">Отклонения месяца</div><h3>Аномалии расходов</h3></div></div>
+        <div id="anomalyList" class="compact-list"><div class="loading-state">Сравниваем историю…</div></div>
+    </article>
+    <article class="card feature-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Без записи в базу</div><h3>Сценарий «что если»</h3></div></div>
+        <form id="whatIfForm" class="scenario-form">
+            <label>Доход в месяц<input name="income" type="number" min="0" step="100" required></label>
+            <label>Расход в месяц<input name="expense" type="number" min="0" step="100" required></label>
+            <label>В накопления, %<input name="savings_percent" type="number" min="0" max="100" step="0.1" required></label>
+            <label>В валюту, %<input name="currency_percent" type="number" min="0" max="100" step="0.1" required></label>
+            <label>Доходность накоплений, %<input name="savings_rate" type="number" min="0" step="0.1" value="5"></label>
+            <label>Изменение валюты, %<input name="currency_rate" type="number" min="0" step="0.1" value="0"></label>
+            <label>Горизонт, месяцев<input name="horizon_months" type="number" min="1" max="600" value="12" required></label>
+            <button class="btn btn-primary" type="submit">Рассчитать</button>
+        </form>
+        <div id="scenarioResult" class="result-strip"><span>Введите параметры</span></div>
+    </article>
+    <article class="card feature-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Еженедельный обзор</div><h3>Отчёт и следующие действия</h3></div></div>
+        <div id="weeklyReport"><div class="loading-state">Готовим отчёт…</div></div>
+    </article>
+</div>
+{% endblock %}

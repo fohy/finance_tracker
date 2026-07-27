@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="period-toolbar">
+    <div class="segmented period-segment">
+        <button data-period="day">День</button>
+        <button data-period="week">Неделя</button>
+        <button data-period="month" class="active">Месяц</button>
+    </div>
+    <div class="date-navigator">
+        <button class="icon-btn" data-period-nav="prev" aria-label="Предыдущий период"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-chevron-left"></use></svg></button>
+        <button class="date-label" id="periodLabel" type="button" aria-label="Выбранный период">—</button>
+        <button class="icon-btn" data-period-nav="next" aria-label="Следующий период"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-chevron-right"></use></svg></button>
+    </div>
+    <select class="person-filter" id="personFilter"><option value="">Все вместе</option></select>
+</div>
+
+<div class="hero-grid">
+    <article class="card balance-hero">
+        <div class="card-kicker">Общий капитал</div>
+        <div class="hero-value" id="totalCapital">—</div>
+        <div class="hero-meta"><span id="capitalTrend" class="trend-chip">—</span><span>деньги на счетах, в накоплениях и инвестициях</span></div>
+        <div class="balance-split">
+            <div><span>На жизнь</span><strong id="lifeBalance">—</strong></div>
+            <div><span>Накопления</span><strong id="savingsBalance">—</strong></div>
+            <div><span>Валютный резерв</span><strong id="currencyBalance">—</strong></div>
+            <div><span>Инвестиции</span><strong id="investmentBalance">—</strong></div>
+        </div>
+    </article>
+    <article class="card score-card">
+        <div class="score-ring" id="scoreRing"><div><strong id="scoreValue">—</strong><span>/ 100</span></div></div>
+        <div class="score-copy"><div class="card-kicker">Индекс правильности</div><h3 id="scoreLabel">—</h3><p id="scoreTip">—</p></div>
+    </article>
+</div>
+
+<div class="metric-grid">
+    <article class="metric-card"><div class="metric-icon income"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-arrow-up"></use></svg></div><div><span>Доходы</span><strong id="metricIncome">—</strong><small id="deltaIncome">—</small></div></article>
+    <article class="metric-card"><div class="metric-icon expense"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-arrow-down"></use></svg></div><div><span>Расходы</span><strong id="metricExpense">—</strong><small id="deltaExpense">—</small></div></article>
+    <article class="metric-card"><div class="metric-icon net"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-balance"></use></svg></div><div><span>Чистый результат</span><strong id="metricNet">—</strong><small id="deltaNet">—</small></div></article>
+    <article class="metric-card"><div class="metric-icon invest"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-invest"></use></svg></div><div><span>Инвестировано</span><strong id="metricInvested">—</strong><small id="deltaInvested">—</small></div></article>
+</div>
+
+<div class="dashboard-grid">
+    <article class="card allocation-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Автоматический план</div><h3>Как распределить доход</h3><p class="muted">Расчёт по фактическим доходам, вашему лимиту трат и целевой доле инвестиций.</p></div><div class="allocation-income"><span>Получено за период</span><strong id="allocationIncome">—</strong></div></div>
+        <div class="allocation-grid" id="allocationGrid">
+            <div class="loading-state" role="status">Рассчитываем план…</div>
+        </div>
+        <div class="allocation-advice"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-target"></use></svg><p id="allocationAdvice">—</p><a href="/settings" class="text-link">Изменить цели</a></div>
+    </article>
+    <article class="card chart-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Динамика</div><h3>Доходы, расходы и инвестиции</h3></div><div class="legend"><span class="income-dot">Доходы</span><span class="expense-dot">Расходы</span><span class="invest-dot">Инвестиции</span></div></div>
+        <div class="chart-wrap" id="trendChart"><div class="loading-state" role="status">Строим динамику…</div></div>
+    </article>
+    <article class="card spending-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Статистика трат</div><h3>Как расходуются деньги</h3></div><span class="period-hint">за выбранный период</span></div>
+        <div class="spending-stat-grid">
+            <div><span>В среднем за день</span><strong id="averageDailyExpense">—</strong><small>по календарным дням периода</small></div>
+            <div><span>Средний чек</span><strong id="averageExpense">—</strong><small>на одну расходную операцию</small></div>
+            <div><span>Количество трат</span><strong id="expenseCount">—</strong><small id="activeExpenseDays">—</small></div>
+            <div><span>Крупнейшая трата</span><strong id="largestExpense">—</strong><small id="largestExpenseMeta">—</small></div>
+        </div>
+    </article>
+    <article class="card category-card">
+        <div class="card-header"><div><div class="card-kicker">Профиль расходов</div><h3>Траты по категориям</h3></div><button class="text-link" type="button" id="addDashboardCategory">Добавить категорию</button></div>
+        <div id="categoryBreakdown" class="category-list"><div class="loading-state" role="status">Собираем категории…</div></div>
+    </article>
+    <article class="card category-card"><div class="card-header"><div><div class="card-kicker">Лимиты</div><h3>Бюджеты категорий</h3></div><a href="/settings" class="text-link">Настроить</a></div><div id="budgetOverview" class="category-list"><div class="loading-state" role="status">Проверяем лимиты…</div></div></article>
+    <article class="card forecast-card">
+        <div class="card-header"><div><div class="card-kicker">Следующий месяц</div><h3>Прогноз по метрикам</h3></div></div>
+        <div class="forecast-grid">
+            <div><span>Доход</span><strong id="forecastIncome">—</strong></div>
+            <div><span>Расход</span><strong id="forecastExpense">—</strong></div>
+            <div><span>Свободный остаток</span><strong id="forecastNet">—</strong></div>
+            <div><span>Инвестиции</span><strong id="forecastInvested">—</strong></div>
+        </div>
+        <p class="muted">Прогноз строится по средним значениям последних трёх месяцев и обновляется после каждой операции.</p>
+    </article>
+    <article class="card recent-card span-2">
+        <div class="card-header"><div><div class="card-kicker">Последние действия</div><h3>Операции за период</h3></div><a href="/transactions" class="text-link">Все операции</a></div>
+        <div id="recentTransactions" class="transaction-list"><div class="loading-state" role="status">Загружаем операции…</div></div>
+    </article>
+</div>
+{% endblock %}

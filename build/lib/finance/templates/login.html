@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#20231f">
+    <meta name="icons-url" content="{{ asset_url('icons.svg') }}">
+    <title>Вход · FinFlow</title>
+    {% include "_theme_bootstrap.html" %}
+    <link rel="stylesheet" href="{{ asset_url('css/app.css') }}">
+</head>
+<body class="login-page" data-page="login">
+    <button class="icon-btn theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="Переключить тему" title="Переключить тему">
+        <svg class="theme-icon theme-icon-sun" aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-sun"></use></svg>
+        <svg class="theme-icon theme-icon-moon" aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-moon"></use></svg>
+    </button>
+    <main class="login-shell">
+        <section class="login-story" aria-label="О FinFlow">
+            <div class="brand login-brand">
+                <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+                <div><strong>FinFlow</strong><span>личные финансы</span></div>
+            </div>
+            <div class="login-story-copy">
+                <h1>Финансы<br><em>без лишнего.</em></h1>
+                <p>Доходы, расходы, цели и капитал в одном понятном обзоре.</p>
+            </div>
+            <img class="login-illustration" src="{{ asset_url('illustrations/calm-growth.svg') }}" alt="" aria-hidden="true">
+        </section>
+        <section class="login-card" aria-labelledby="loginTitle">
+            <div class="login-card-head">
+                <h2 id="loginTitle">Вход в FinFlow</h2>
+                <p>Введите данные своей учётной записи.</p>
+            </div>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <div class="login-message {{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
+            <form method="post" class="login-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="login">Логин</label>
+                <input id="login" name="login" autocomplete="username" placeholder="Ваш логин" required autofocus>
+                <label for="password">Пароль</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required>
+                <button class="btn btn-primary" type="submit">Войти</button>
+            </form>
+        </section>
+    </main>
+    <script src="{{ asset_url('js/app.js') }}"></script>
+</body>
+</html>

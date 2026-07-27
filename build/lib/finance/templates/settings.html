@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="settings-layout">
+    <form class="card settings-card" id="settingsForm">
+        <div class="card-header"><div><div class="card-kicker">Ваш план</div><h3>Сколько откладывать и тратить</h3><p class="muted">Эти значения — ваши цели, а не фактический доход или уже совершённые траты.</p></div></div>
+        <label>На накопительный счёт с каждого дохода, %<input type="number" name="investment_target_percent" min="0" max="100" step="0.1"><small>Минимальная доля каждой зарплаты для накоплений. Неизрасходованный остаток также добавляется сюда.</small></label>
+        <label>В валютный резерв с каждого дохода, %<input type="number" name="currency_target_percent" min="0" max="100" step="0.1"><small>Бюджет на покупку валюты в пересчёте на основную валюту.</small></label>
+        <label>Не тратить больше за месяц<input type="number" name="monthly_life_budget" min="0" step="100"><small>Ваш максимальный бюджет на обычные расходы за месяц. Доход вводится отдельно через операции.</small></label>
+        <label>Знак основной валюты<input type="text" name="currency" maxlength="3"><small>Например, ₽ или $. Отображается рядом с суммами.</small></label>
+        <label>ISO-код основной валюты<input type="text" name="base_currency_code" maxlength="3" placeholder="RUB"><small>Например, RUB или USD. Используется для оценки валютных счетов.</small></label>
+        <button class="btn btn-primary" type="submit">Сохранить настройки</button>
+    </form>
+    <article class="card settings-card"><div class="card-header"><div><div class="card-kicker">Контроль трат</div><h3>Категории и лимиты</h3></div><div class="card-actions"><button class="btn btn-ghost" id="addSettingsCategory"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Категория</button><button class="btn btn-secondary" id="addBudgetBtn"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Лимит</button></div></div><div id="budgetSettings" class="category-list"><div class="loading-state" role="status">Загружаем лимиты…</div></div></article>
+    <article class="card settings-card accounts-settings">
+        <div class="card-header"><div><div class="card-kicker">Деньги и накопления</div><h3>Счета</h3><p class="muted">Основные, наличные, накопительные, вклады и инвестиции.</p></div><button class="btn btn-primary" id="addAccountBtn"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Добавить счёт</button></div>
+        <div id="accountSettings" class="account-settings-list"><div class="loading-state" role="status">Загружаем счета…</div></div>
+    </article>
+</div>
+{% endblock %}

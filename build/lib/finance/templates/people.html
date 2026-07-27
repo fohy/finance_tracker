@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="period-toolbar">
+    <div class="segmented period-segment"><button data-period="day">День</button><button data-period="week">Неделя</button><button data-period="month" class="active">Месяц</button></div>
+    <div class="date-navigator"><button class="icon-btn" data-period-nav="prev" aria-label="Предыдущий период"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-chevron-left"></use></svg></button><button class="date-label" id="periodLabel" type="button" aria-label="Выбранный период">—</button><button class="icon-btn" data-period-nav="next" aria-label="Следующий период"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-chevron-right"></use></svg></button></div>
+</div>
+<div id="peopleMetrics" class="people-grid"><div class="card loading-state" role="status">Собираем персональную статистику…</div></div>
+{% endblock %}

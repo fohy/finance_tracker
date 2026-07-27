@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="period-toolbar">
+    <div class="segmented period-segment">
+        <button data-period="day">День</button><button data-period="week">Неделя</button><button data-period="month" class="active">Месяц</button>
+    </div>
+    <div class="date-navigator"><button class="icon-btn" data-period-nav="prev" aria-label="Предыдущий период"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-chevron-left"></use></svg></button><button class="date-label" id="periodLabel" type="button" aria-label="Выбранный период">—</button><button class="icon-btn" data-period-nav="next" aria-label="Следующий период"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-chevron-right"></use></svg></button></div>
+    <select class="person-filter" id="personFilter"><option value="">Все люди</option></select>
+</div>
+<div class="card table-card">
+    <div class="card-header table-tools">
+        <div><div class="card-kicker">Журнал</div><h3>Все доходы и расходы</h3></div>
+        <div class="toolbar-actions"><label class="sr-only" for="txSearch">Поиск по заметке</label><input id="txSearch" type="search" placeholder="Поиск по заметке…"><label class="sr-only" for="txTypeFilter">Тип операции</label><select id="txTypeFilter"><option value="">Все типы</option><option value="income">Доходы</option><option value="expense">Расходы</option><option value="transfer">Инвестиции</option><option value="interest">Проценты</option></select><a class="btn btn-secondary" id="exportTransactions">Экспорт CSV</a><button class="btn btn-secondary" id="addCategoryBtn"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Категория</button></div>
+    </div>
+    <div class="table-responsive">
+        <table><thead><tr><th>Дата</th><th>Операция</th><th>Заметка</th><th>Человек</th><th>Счёт</th><th class="align-right">Сумма</th><th><span class="sr-only">Действия</span></th></tr></thead><tbody id="transactionsTable"><tr><td colspan="7"><div class="loading-state" role="status">Загружаем журнал…</div></td></tr></tbody></table>
+    </div>
+    <div class="pagination" id="transactionsPagination"></div>
+</div>
+{% endblock %}

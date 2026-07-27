@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-intro"><div><div class="card-kicker">Будущие траты</div><p><strong>План покупок</strong> — это конкретные вещи и события: ноутбук, техника, ремонт или поездка. Приложение оценивает, укладывается ли покупка в свободный бюджет и к какому сроку она доступна.</p></div><button class="btn btn-primary" id="addPurchaseBtn"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Добавить покупку</button></div>
+<div class="card available-banner"><div><span>Свободно на планируемые покупки</span><strong id="availableForPurchases">—</strong><small>в месяц после лимита жизни и обязательных накоплений</small></div><div class="shield"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-shield"></use></svg></div></div>
+<div id="purchaseGrid" class="entity-grid"><div class="card loading-state" role="status">Собираем план покупок…</div></div>
+{% endblock %}
