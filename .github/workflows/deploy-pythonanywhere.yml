@@ -1,0 +1,79 @@
+name: Deploy to PythonAnywhere
+
+on:
+  workflow_run:
+    workflows: [Checks]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pythonanywhere-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && vars.ENABLE_PYTHONANYWHERE_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    env:
+      PA_USERNAME: ${{ secrets.PA_USERNAME }}
+      PA_DOMAIN: ${{ secrets.PA_DOMAIN }}
+      PA_API_TOKEN: ${{ secrets.PA_API_TOKEN }}
+      PA_SSH_PRIVATE_KEY: ${{ secrets.PA_SSH_PRIVATE_KEY }}
+      PA_SSH_HOST: ${{ secrets.PA_SSH_HOST }}
+      PA_API_BASE: ${{ secrets.PA_API_BASE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Validate deployment secrets
+        run: |
+          test -n "$PA_USERNAME"
+          test -n "$PA_DOMAIN"
+          test -n "$PA_API_TOKEN"
+          test -n "$PA_SSH_PRIVATE_KEY"
+
+      - name: Configure SSH
+        run: |
+          SSH_HOST="${PA_SSH_HOST:-ssh.pythonanywhere.com}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PA_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Back up production database
+        run: |
+          SSH_HOST="${PA_SSH_HOST:-ssh.pythonanywhere.com}"
+          ssh "$PA_USERNAME@$SSH_HOST" \
+            'mkdir -p ~/finance_tracker/instance ~/finance_tracker/backups && if [ -x ~/finance_tracker/.venv/bin/python ] && [ -f ~/finance_tracker/scripts/backup_db.py ] && [ -f ~/finance_tracker/instance/finance.db ]; then ~/finance_tracker/.venv/bin/python ~/finance_tracker/scripts/backup_db.py; fi'
+
+      - name: Synchronize application without private data
+        run: |
+          SSH_HOST="${PA_SSH_HOST:-ssh.pythonanywhere.com}"
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.venv/' \
+            --exclude '.env' \
+            --exclude 'instance/' \
+            --exclude 'backups/' \
+            --exclude '__pycache__/' \
+            ./ "$PA_USERNAME@$SSH_HOST:~/finance_tracker/"
+
+      - name: Install production dependencies
+        run: |
+          SSH_HOST="${PA_SSH_HOST:-ssh.pythonanywhere.com}"
+          ssh "$PA_USERNAME@$SSH_HOST" \
+            'cd ~/finance_tracker && test -x .venv/bin/python && .venv/bin/pip install --disable-pip-version-check -r requirements.txt'
+
+      - name: Reload web application
+        run: |
+          API_BASE="${PA_API_BASE:-https://www.pythonanywhere.com}"
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Token $PA_API_TOKEN" \
+            "$API_BASE/api/v0/user/$PA_USERNAME/webapps/$PA_DOMAIN/reload/"

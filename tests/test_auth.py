@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+from finance import create_app
+
 
 def test_private_routes_and_api_require_login(app):
     client = app.test_client()
@@ -27,3 +31,23 @@ def test_login_rotates_session_and_csrf_protects_writes(app):
         json={"name": "Тест", "type": "expense"},
     )
     assert response.status_code == 201
+
+
+def test_production_requires_secret_and_enables_secure_cookie(tmp_path):
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        create_app({
+            "APP_ENV": "production",
+            "SECRET_KEY": "local-finance-secret",
+            "DATABASE": str(tmp_path / "invalid.db"),
+            "TESTING": True,
+        })
+
+    app = create_app({
+        "APP_ENV": "production",
+        "SECRET_KEY": "x" * 64,
+        "DATABASE": str(tmp_path / "production.db"),
+        "SESSION_COOKIE_SECURE": True,
+        "SEED_DEMO": False,
+        "TESTING": True,
+    })
+    assert app.config["SESSION_COOKIE_SECURE"] is True

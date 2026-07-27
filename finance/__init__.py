@@ -20,6 +20,9 @@ def create_app(test_config: Mapping[str, object] | None = None) -> Flask:
     if test_config:
         app.config.update(test_config)
 
+    if app.config["APP_ENV"] == "production" and app.config["SECRET_KEY"] == "local-finance-secret":
+        raise RuntimeError("В production необходимо задать уникальный SECRET_KEY")
+
     init_app(app)
     init_auth(app)
     init_cli(app)

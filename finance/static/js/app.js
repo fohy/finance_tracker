@@ -32,6 +32,168 @@
         return `<svg class="${className}" aria-hidden="true"><use href="${iconsUrl}#icon-${safeKey}"></use></svg>`;
     }
 
+    const customSelectRegistry = new Map();
+    let activeCustomSelect = null;
+
+    function selectLabel(select) {
+        const explicit = select.getAttribute('aria-label');
+        if (explicit) return explicit;
+        const label = select.closest('label');
+        const text = label ? [...label.childNodes].find(node => node.nodeType === Node.TEXT_NODE)?.textContent?.trim() : '';
+        return text || 'Выберите значение';
+    }
+
+    function closeCustomSelect() {
+        if (!activeCustomSelect) return;
+        activeCustomSelect.menu.classList.remove('is-open');
+        activeCustomSelect.button.setAttribute('aria-expanded', 'false');
+        activeCustomSelect = null;
+    }
+
+    function enhanceCustomSelect(select) {
+        if (customSelectRegistry.has(select) || select.multiple || Number(select.size) > 1) return;
+        const wrapper = document.createElement('span');
+        wrapper.className = 'custom-select';
+        if (select.classList.contains('person-filter')) wrapper.classList.add('custom-select--person-filter');
+        if (select.classList.contains('compact-select')) wrapper.classList.add('custom-select--compact');
+        select.before(wrapper);
+        wrapper.appendChild(select);
+        select.classList.add('native-select-proxy');
+        select.tabIndex = -1;
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'custom-select-trigger';
+        button.setAttribute('aria-haspopup', 'listbox');
+        button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-label', selectLabel(select));
+        button.innerHTML = '<span></span><i aria-hidden="true"></i>';
+        wrapper.appendChild(button);
+
+        const menu = document.createElement('div');
+        menu.className = 'custom-select-menu';
+        menu.id = `custom-select-${customSelectRegistry.size + 1}`;
+        menu.setAttribute('role', 'listbox');
+        button.setAttribute('aria-controls', menu.id);
+        document.body.appendChild(menu);
+        const control = { select, button, menu, activeIndex: select.selectedIndex };
+        customSelectRegistry.set(select, control);
+
+        const sync = () => {
+            const selected = select.options[select.selectedIndex];
+            button.querySelector('span').textContent = selected?.textContent || 'Выберите значение';
+            button.disabled = select.disabled;
+            button.classList.toggle('is-placeholder', !select.value);
+            button.classList.toggle('is-invalid', select.required && !select.value);
+            control.activeIndex = Math.max(0, select.selectedIndex);
+        };
+
+        const buildMenu = () => {
+            menu.replaceChildren();
+            [...select.options].forEach((option, index) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'custom-select-option';
+                item.setAttribute('role', 'option');
+                item.setAttribute('aria-selected', String(index === select.selectedIndex));
+                item.disabled = option.disabled;
+                item.dataset.index = String(index);
+                item.textContent = option.textContent;
+                item.addEventListener('click', () => {
+                    select.selectedIndex = index;
+                    select.dispatchEvent(new Event('input', { bubbles: true }));
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    sync();
+                    closeCustomSelect();
+                    button.focus();
+                });
+                menu.appendChild(item);
+            });
+        };
+
+        const highlight = index => {
+            const options = [...select.options];
+            if (!options.length) return;
+            let next = Math.max(0, Math.min(index, options.length - 1));
+            while (options[next]?.disabled && next !== control.activeIndex) next += next > control.activeIndex ? 1 : -1;
+            if (!options[next] || options[next].disabled) return;
+            control.activeIndex = next;
+            $$('.custom-select-option', menu).forEach((item, itemIndex) => item.classList.toggle('is-active', itemIndex === next));
+            const item = menu.children[next];
+            if (item?.offsetTop < menu.scrollTop) menu.scrollTop = item.offsetTop;
+            else if (item && item.offsetTop + item.offsetHeight > menu.scrollTop + menu.clientHeight) {
+                menu.scrollTop = item.offsetTop + item.offsetHeight - menu.clientHeight;
+            }
+        };
+
+        const open = () => {
+            if (button.disabled) return;
+            if (activeCustomSelect === control) { closeCustomSelect(); return; }
+            closeCustomSelect();
+            buildMenu();
+            const rect = button.getBoundingClientRect();
+            const viewportGutter = 8;
+            const menuGap = 7;
+            const menuWidth = Math.min(rect.width, window.innerWidth - viewportGutter * 2);
+            const spaceBelow = window.innerHeight - rect.bottom - menuGap - viewportGutter;
+            const spaceAbove = rect.top - menuGap - viewportGutter;
+            const openAbove = spaceBelow < 220 && spaceAbove > spaceBelow;
+            const availableSpace = openAbove ? spaceAbove : spaceBelow;
+            menu.dataset.placement = openAbove ? 'above' : 'below';
+            menu.style.left = `${Math.max(viewportGutter, Math.min(rect.left, window.innerWidth - menuWidth - viewportGutter))}px`;
+            menu.style.width = `${menuWidth}px`;
+            menu.style.maxHeight = `${Math.max(0, Math.min(360, availableSpace))}px`;
+            menu.style.top = openAbove ? 'auto' : `${rect.bottom + menuGap}px`;
+            menu.style.bottom = openAbove ? `${window.innerHeight - rect.top + menuGap}px` : 'auto';
+            menu.classList.add('is-open');
+            button.setAttribute('aria-expanded', 'true');
+            activeCustomSelect = control;
+            highlight(select.selectedIndex);
+        };
+
+        button.addEventListener('click', open);
+        button.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { closeCustomSelect(); return; }
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                if (activeCustomSelect === control) {
+                    menu.children[control.activeIndex]?.click();
+                } else open();
+                return;
+            }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            if (activeCustomSelect !== control) open();
+            if (event.key === 'Home') highlight(0);
+            else if (event.key === 'End') highlight(select.options.length - 1);
+            else highlight(control.activeIndex + (event.key === 'ArrowDown' ? 1 : -1));
+        });
+        select.addEventListener('change', sync);
+        select.addEventListener('invalid', event => {
+            event.preventDefault();
+            button.classList.add('is-invalid');
+            button.focus();
+        });
+        new MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true });
+        sync();
+    }
+
+    function setupCustomSelects(root = document) {
+        $$('select:not([data-native-select])', root).forEach(enhanceCustomSelect);
+    }
+
+    document.addEventListener('pointerdown', event => {
+        if (activeCustomSelect && !activeCustomSelect.button.contains(event.target) && !activeCustomSelect.menu.contains(event.target)) closeCustomSelect();
+    });
+    window.addEventListener('resize', closeCustomSelect);
+    document.addEventListener('scroll', event => {
+        if (!activeCustomSelect || activeCustomSelect.menu === event.target || activeCustomSelect.menu.contains(event.target)) return;
+        closeCustomSelect();
+    }, true);
+    new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
+        if (node.nodeType === Node.ELEMENT_NODE) setupCustomSelects(node.matches?.('select') ? node.parentElement : node);
+    }))).observe(document.documentElement, { childList: true, subtree: true });
+
     function setupTheme() {
         const media = window.matchMedia('(prefers-color-scheme: dark)');
         const storedTheme = () => {
@@ -820,9 +982,17 @@
         const container = $('#recurringList');
         if (!container) return;
         const typeLabels = { expense: 'Расход', income: 'Доход', transfer: 'Перевод' };
-        container.innerHTML = items.length ? items.map(item => `<article class="card entity-card"><div class="card-kicker">${escapeHtml(item.frequency === 'monthly' ? 'Ежемесячно' : 'Еженедельно')} · ${typeLabels[item.tx_type] || escapeHtml(item.tx_type)}</div><h3>${escapeHtml(item.title)}</h3><div class="entity-amount">${money(item.amount)}</div><p class="muted">Следующая дата: ${formatDate(item.next_date)} · ${escapeHtml(item.category_name || item.account_name)}</p><div class="entity-footer"><button class="btn btn-secondary" data-apply-recurring="${item.id}" ${item.is_active ? '' : 'disabled'}>Провести</button><button class="btn btn-ghost" data-toggle-recurring="${item.id}" data-active="${item.is_active}">${item.is_active ? 'Пауза' : 'Включить'}</button></div></article>`).join('') : '<div class="empty-state">Добавьте зарплату, аренду или подписку</div>';
+        container.innerHTML = items.length ? items.map(item => `<article class="card entity-card"><div class="card-kicker">${escapeHtml(item.frequency === 'monthly' ? 'Ежемесячно' : 'Еженедельно')} · ${typeLabels[item.tx_type] || escapeHtml(item.tx_type)}</div><h3>${escapeHtml(item.title)}</h3><div class="entity-amount">${money(item.amount)}</div><p class="muted">Следующая дата: ${formatDate(item.next_date)} · ${escapeHtml(item.category_name || item.account_name)}</p><div class="entity-footer"><button class="btn btn-secondary" data-apply-recurring="${item.id}" ${item.is_active ? '' : 'disabled'}>Провести</button><button class="btn btn-ghost" data-toggle-recurring="${item.id}" data-active="${item.is_active}">${item.is_active ? 'Пауза' : 'Включить'}</button><button class="btn btn-danger" data-delete-recurring="${item.id}">${iconSvg('trash')}Удалить</button></div></article>`).join('') : '<div class="empty-state">Добавьте зарплату, аренду или подписку</div>';
         $$('[data-apply-recurring]').forEach(btn => btn.addEventListener('click', async () => { try { await api(`/api/recurring-transactions/${btn.dataset.applyRecurring}/apply`, { method: 'POST' }); toast('Операция проведена'); await refreshBootstrap(); loadRecurring(); } catch (error) { toast(error.message, 'error'); } }));
         $$('[data-toggle-recurring]').forEach(btn => btn.addEventListener('click', async () => { await api(`/api/recurring-transactions/${btn.dataset.toggleRecurring}`, { method: 'PATCH', body: { is_active: btn.dataset.active !== '1' } }); loadRecurring(); }));
+        $$('[data-delete-recurring]').forEach(btn => btn.addEventListener('click', async () => {
+            if (!confirm('Удалить регулярную операцию? Уже проведённые операции останутся в истории.')) return;
+            try {
+                await api(`/api/recurring-transactions/${btn.dataset.deleteRecurring}`, { method: 'DELETE' });
+                toast('Регулярная операция удалена');
+                await loadRecurring();
+            } catch (error) { toast(error.message, 'error'); }
+        }));
     }
 
     function openRecurringForm() {
@@ -918,7 +1088,7 @@
                 });
             }
         }
-        $('#categoryRules').innerHTML = rules.length ? rules.map(rule => `<div class="list-row ${rule.is_active ? '' : 'is-muted'}"><span>«${escapeHtml(rule.pattern)}» → ${escapeHtml(rule.category_name)} <small>приоритет ${rule.priority}</small></span><span class="row-buttons"><button class="btn btn-ghost" data-edit-rule="${rule.id}">${iconSvg('edit')}Изменить</button><button class="btn btn-ghost" data-toggle-rule="${rule.id}" data-active="${rule.is_active}">${rule.is_active ? 'Пауза' : 'Включить'}</button><button class="delete-btn" data-delete-rule="${rule.id}" aria-label="Удалить правило">${iconSvg('trash')}</button></span></div>`).join('') : '<div class="empty-state">Правил пока нет</div>';
+        $('#categoryRules').innerHTML = rules.length ? rules.map(rule => `<div class="list-row ${rule.is_active ? '' : 'is-muted'}"><span>«${escapeHtml(rule.pattern)}» → ${escapeHtml(rule.category_name)} <small>приоритет ${rule.priority}</small></span><span class="row-buttons"><button class="btn btn-ghost" data-edit-rule="${rule.id}">${iconSvg('edit')}Изменить</button><button class="btn btn-ghost" data-toggle-rule="${rule.id}" data-active="${rule.is_active}">${rule.is_active ? 'Пауза' : 'Включить'}</button><button class="btn btn-danger" data-delete-rule="${rule.id}">${iconSvg('trash')}Удалить</button></span></div>`).join('') : '<div class="empty-state">Правил пока нет</div>';
         $$('[data-edit-rule]').forEach(button => button.addEventListener('click', () => {
             const rule = rules.find(item => item.id === Number(button.dataset.editRule));
             const options = state.bootstrap.categories.map(category => `<option value="${category.id}" ${category.id === rule.category_id ? 'selected' : ''}>${escapeHtml(category.name)} · ${category.type === 'expense' ? 'расход' : 'доход'}</option>`).join('');
@@ -927,8 +1097,15 @@
                 catch (error) { toast(error.message, 'error'); }
             });
         }));
-        $$('[data-toggle-rule]').forEach(button => button.addEventListener('click', async () => { await api(`/api/category-rules/${button.dataset.toggleRule}`, { method: 'PATCH', body: { is_active: button.dataset.active !== '1' } }); loadAutomation(); }));
-        $$('[data-delete-rule]').forEach(button => button.addEventListener('click', async () => { if (confirm('Удалить правило?')) { await api(`/api/category-rules/${button.dataset.deleteRule}`, { method: 'DELETE' }); loadAutomation(); } }));
+        $$('[data-toggle-rule]').forEach(button => button.addEventListener('click', async () => {
+            try { await api(`/api/category-rules/${button.dataset.toggleRule}`, { method: 'PATCH', body: { is_active: button.dataset.active !== '1' } }); await loadAutomation(); }
+            catch (error) { toast(error.message, 'error'); }
+        }));
+        $$('[data-delete-rule]').forEach(button => button.addEventListener('click', async () => {
+            if (!confirm('Удалить правило без возможности восстановления?')) return;
+            try { await api(`/api/category-rules/${button.dataset.deleteRule}`, { method: 'DELETE' }); toast('Правило удалено'); await loadAutomation(); }
+            catch (error) { toast(error.message, 'error'); }
+        }));
         await loadUpcoming();
     }
 
@@ -1021,6 +1198,7 @@
 
     async function init() {
         setupTheme();
+        setupCustomSelects();
         if (state.page === 'login') return;
         try {
             await refreshBootstrap();

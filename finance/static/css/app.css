@@ -1612,6 +1612,241 @@ select option:disabled { color: var(--ink-subtle); }
     #settingsForm > * { grid-column: auto; }
 }
 
+/* Rich native select picker where the browser supports customizable selects */
+@supports (appearance: base-select) {
+    select,
+    select.person-filter,
+    ::picker(select) {
+        appearance: base-select;
+        -webkit-appearance: base-select;
+    }
+
+    select::picker-icon { display: none; }
+
+    ::picker(select) {
+        max-height: min(360px, 55vh);
+        margin-top: 7px;
+        padding: 6px;
+        overflow: auto;
+        color: var(--ink-strong);
+        background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+        border: 1px solid var(--border-strong);
+        border-radius: calc(var(--radius-lg) + 2px);
+        box-shadow: 0 18px 50px color-mix(in srgb, #000 24%, transparent), 0 3px 12px color-mix(in srgb, #000 10%, transparent);
+        opacity: 0;
+        transform: translateY(-5px) scale(.985);
+        transform-origin: top;
+        transition: opacity .14s ease, transform .14s ease, display .14s allow-discrete;
+    }
+
+    ::picker(select):popover-open {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+
+    @starting-style {
+        ::picker(select):popover-open {
+            opacity: 0;
+            transform: translateY(-5px) scale(.985);
+        }
+    }
+
+    select option {
+        min-height: 40px;
+        padding: 10px 12px;
+        color: var(--ink);
+        background: transparent;
+        border: 0;
+        border-radius: var(--radius);
+        font: inherit;
+        cursor: pointer;
+        transition: color .12s ease, background .12s ease;
+    }
+
+    select option + option { margin-top: 2px; }
+    select option:hover,
+    select option:focus-visible { color: var(--ink-strong); background: var(--control-hover); outline: none; }
+    select option:checked { color: var(--ink-strong); background: color-mix(in srgb, var(--accent) 13%, var(--control-bg)); }
+    select option::checkmark { margin-left: auto; color: var(--accent-strong); }
+    select option:disabled { color: var(--ink-subtle); cursor: not-allowed; opacity: .6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    @supports (appearance: base-select) {
+        ::picker(select) { transition: none; }
+    }
+}
+
+/* Cross-browser custom select, including Safari on macOS */
+.custom-select { position: relative; display: block; width: 100%; min-width: 0; }
+.custom-select--person-filter { width: auto; min-width: 160px; margin-left: auto; }
+.custom-select--compact { width: auto; min-width: 110px; flex: 0 0 auto; }
+.toolbar-actions > .custom-select { width: auto; min-width: 145px; }
+.custom-select .native-select-proxy {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip-path: inset(50%);
+    opacity: 0;
+    pointer-events: none;
+}
+.custom-select-trigger {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    grid-template-columns: minmax(0, 1fr) 16px;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 13px 9px 11px;
+    color: var(--ink-strong);
+    background: var(--control-bg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.custom-select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custom-select-trigger > i {
+    display: block;
+    width: 16px;
+    height: 16px;
+    background: url("../caret-down-phosphor-v2.0.8.svg") center / 16px 16px no-repeat;
+    transition: transform .15s ease;
+}
+.custom-select-trigger:hover { background-color: var(--control-hover); border-color: color-mix(in srgb, var(--accent) 34%, var(--border-strong)); }
+.custom-select-trigger:focus-visible,
+.custom-select-trigger[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 68%, transparent); outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.custom-select-trigger[aria-expanded="true"] > i { transform: rotate(180deg); }
+.custom-select-trigger.is-placeholder { color: var(--ink-muted); }
+.custom-select-trigger.is-invalid { border-color: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 12%, transparent); }
+.custom-select-trigger:disabled { color: var(--ink-subtle); background: var(--surface-subtle); cursor: not-allowed; opacity: .62; }
+
+.custom-select-menu {
+    position: fixed;
+    z-index: 1000;
+    display: none;
+    gap: 2px;
+    padding: 5px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    color: var(--ink-strong);
+    background: color-mix(in srgb, var(--surface-raised) 97%, transparent);
+    border: 1px solid var(--border-strong);
+    border-radius: calc(var(--radius-lg) + 2px);
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: 0 20px 60px color-mix(in srgb, #000 28%, transparent), 0 4px 16px color-mix(in srgb, #000 12%, transparent);
+    backdrop-filter: blur(18px);
+}
+.custom-select-menu.is-open { display: grid; transform-origin: top; animation: customSelectIn .13s ease-out both; }
+.custom-select-menu.is-open[data-placement="above"] { transform-origin: bottom; animation-name: customSelectInAbove; }
+.custom-select-option {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    padding: 9px 32px 9px 8px;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius);
+    font: inherit;
+    line-height: 1.35;
+    text-align: left;
+    cursor: pointer;
+}
+.custom-select-option:hover,
+.custom-select-option.is-active { color: var(--ink-strong); background: var(--control-hover); outline: none; }
+.custom-select-option[aria-selected="true"] { color: var(--ink-strong); background: color-mix(in srgb, var(--accent) 13%, var(--control-bg)); font-weight: 650; }
+.custom-select-option[aria-selected="true"]::after { position: absolute; top: 50%; right: 13px; width: 5px; height: 9px; content: ""; border: solid var(--accent); border-width: 0 2px 2px 0; transform: translateY(-62%) rotate(45deg); }
+.custom-select-option:disabled { color: var(--ink-subtle); cursor: not-allowed; opacity: .55; }
+
+@keyframes customSelectIn {
+    from { opacity: 0; transform: translateY(-5px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes customSelectInAbove {
+    from { opacity: 0; transform: translateY(5px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (min-width: 761px) {
+    .custom-select-trigger { min-height: 46px; padding: 10px 13px; font-size: 14px; }
+    .custom-select--person-filter .custom-select-trigger { min-height: 44px; }
+    .custom-select-menu { font-size: 14px; }
+}
+
+@media (max-width: 720px) {
+    .custom-select--person-filter { width: 100%; margin-left: 0; }
+    .custom-select--person-filter .custom-select-trigger { min-height: 40px; padding-block: 6px; }
+    .toolbar-actions > .custom-select { width: 100%; min-width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .custom-select-menu.is-open { animation: none; }
+    .custom-select-trigger > i { transition: none; }
+}
+
+/* Contemporary motion system */
+.btn, .icon-btn, .delete-btn, .theme-toggle {
+    transform: translateZ(0);
+    transition: color .16s ease, background-color .16s ease, border-color .16s ease,
+        box-shadow .18s ease, transform .16s cubic-bezier(.2, .8, .2, 1);
+}
+.btn:active, .icon-btn:active, .delete-btn:active, .theme-toggle:active { transform: scale(.965); }
+.btn svg, .icon-btn svg, .delete-btn svg, .nav-icon svg { transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+.btn:hover svg { transform: translateX(1px) scale(1.04); }
+.icon-btn:hover svg, .delete-btn:hover svg { transform: scale(1.1); }
+.nav-item:hover .nav-icon svg { transform: scale(1.08) rotate(-2deg); }
+
+.btn-danger { color: var(--red); background: color-mix(in srgb, var(--red) 7%, transparent); border-color: color-mix(in srgb, var(--red) 17%, var(--border)); }
+.btn-danger:hover { color: var(--red); background: color-mix(in srgb, var(--red) 13%, transparent); border-color: color-mix(in srgb, var(--red) 28%, var(--border)); }
+
+.list-row, .account-setting-row, .allocation-bucket, .result-strip > div {
+    animation: itemReveal .34s cubic-bezier(.2, .75, .25, 1) backwards;
+}
+.list-row:nth-child(2), .account-setting-row:nth-child(2), .allocation-bucket:nth-child(2), .result-strip > div:nth-child(2) { animation-delay: 35ms; }
+.list-row:nth-child(3), .account-setting-row:nth-child(3), .allocation-bucket:nth-child(3), .result-strip > div:nth-child(3) { animation-delay: 70ms; }
+.list-row:nth-child(n+4), .account-setting-row:nth-child(n+4), .result-strip > div:nth-child(n+4) { animation-delay: 95ms; }
+
+@media (hover: hover) and (pointer: fine) {
+    .feature-card, .entity-card, .settings-card, .account-card, .person-card {
+        transition: transform .22s cubic-bezier(.2, .75, .25, 1), border-color .2s ease, box-shadow .22s ease;
+    }
+    .feature-card:hover, .entity-card:hover, .settings-card:hover, .account-card:hover, .person-card:hover {
+        transform: translateY(-2px);
+        border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+        box-shadow: 0 14px 36px color-mix(in srgb, #000 13%, transparent);
+    }
+    .list-row { transition: background-color .16s ease, border-color .16s ease, transform .16s ease; }
+    .list-row:hover { transform: translateX(2px); background-color: var(--control-hover); }
+}
+
+.progress-track i { animation: progressGlow 1.8s ease-in-out 1; }
+.toast { transform-origin: right bottom; }
+
+@keyframes itemReveal {
+    from { opacity: 0; transform: translateY(7px) scale(.992); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes progressGlow {
+    0%, 100% { filter: brightness(1); }
+    45% { filter: brightness(1.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .list-row, .account-setting-row, .allocation-bucket, .result-strip > div,
+    .progress-track i { animation: none !important; }
+    .btn, .icon-btn, .delete-btn, .theme-toggle, .feature-card, .entity-card,
+    .settings-card, .account-card, .person-card { transform: none !important; }
+}
+
 /* Automation and derived insights */
 .feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .feature-card { padding: clamp(18px, 2.2vw, 28px); }

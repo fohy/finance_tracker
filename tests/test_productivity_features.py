@@ -39,6 +39,8 @@ def test_recurring_rule_applies_once_and_moves_next_date(client, csrf_headers):
     assert client.post(f"/api/recurring-transactions/{rule_id}/apply", headers=csrf_headers).status_code == 200
     rule = client.get("/api/recurring-transactions").get_json()["data"][0]
     assert rule["next_date"] > date.today().isoformat()
+    assert client.delete(f"/api/recurring-transactions/{rule_id}", headers=csrf_headers).status_code == 200
+    assert client.get("/api/recurring-transactions").get_json()["data"] == []
 
 
 def test_default_categories_and_spending_statistics(client, csrf_headers):

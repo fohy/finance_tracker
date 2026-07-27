@@ -46,6 +46,14 @@ def test_csv_preview_dedupe_and_category_rule(client, app, csrf_headers):
         json={"pattern": "кофейня", "category_id": category["id"], "priority": 10},
     )
     assert rule.status_code == 201
+    rule_id = rule.get_json()["data"]["id"]
+    updated = client.patch(
+        f"/api/category-rules/{rule_id}", headers=csrf_headers,
+        json={"pattern": "кофейня", "category_id": category["id"], "priority": 20},
+    )
+    assert updated.status_code == 200
+    saved_rule = next(item for item in client.get("/api/category-rules").get_json()["data"] if item["id"] == rule_id)
+    assert saved_rule["priority"] == 20
     csv_data = "Дата;Сумма;Описание\n15.07.2026;-450,50;Кофейня у дома\n".encode()
 
     def upload(path):
@@ -75,6 +83,9 @@ def test_csv_preview_dedupe_and_category_rule(client, app, csrf_headers):
         row = get_db().execute("SELECT category_id, note FROM transactions").fetchone()
         assert row["category_id"] == category["id"]
         assert row["note"] == "Кофейня у дома"
+    deleted = client.delete(f"/api/category-rules/{rule_id}", headers=csrf_headers)
+    assert deleted.status_code == 200
+    assert all(item["id"] != rule_id for item in client.get("/api/category-rules").get_json()["data"])
 
 
 def test_salary_plan_apply_is_idempotent(client, csrf_headers):

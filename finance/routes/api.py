@@ -727,6 +727,16 @@ def update_recurring_transaction(item_id: int):
     return ok()
 
 
+@api_bp.delete("/recurring-transactions/<int:item_id>")
+def delete_recurring_transaction(item_id: int):
+    cursor = get_db().execute("DELETE FROM recurring_transactions WHERE id = ?", (item_id,))
+    if cursor.rowcount == 0:
+        get_db().rollback()
+        return fail("Регулярное правило не найдено", 404)
+    get_db().commit()
+    return ok()
+
+
 @api_bp.get("/activity")
 def activity():
     rows = get_db().execute(

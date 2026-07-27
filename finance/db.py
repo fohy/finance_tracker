@@ -176,9 +176,11 @@ def get_db() -> sqlite3.Connection:
     if "db" not in g:
         db_path = Path(current_app.config["DATABASE"])
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        g.db = sqlite3.connect(db_path)
+        g.db = sqlite3.connect(db_path, timeout=30)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute("PRAGMA busy_timeout = 30000")
+        g.db.execute("PRAGMA journal_mode = WAL")
     return g.db
 
 

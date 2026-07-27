@@ -50,9 +50,111 @@ docker compose run --rm finflow flask --app app create-user --login nastya --per
 После этого все страницы и API требуют входа; изменения API дополнительно защищены
 CSRF-токеном. Для HTTPS установите `SESSION_COOKIE_SECURE=1` в `.env`.
 
-## Онлайн-версия для двоих
+## PythonAnywhere: публичный сайт и приватная SQLite
 
-Нужен не GitHub Pages, а отдельный хост с постоянным диском. Подходящий следующий
-шаг — небольшой VPS с Docker и HTTPS (например, Caddy), либо managed-платформа с
-persistent disk. До публикации в интернет обязательно добавить вход по паролю,
-пользователей и резервные копии; текущая версия рассчитана на локальную сеть.
+GitHub хранит только код. База создаётся в домашнем каталоге PythonAnywhere и не
+попадает ни в репозиторий, ни в static-файлы сайта.
+
+### 1. Установка
+
+Откройте Bash console в PythonAnywhere и выполните:
+
+```bash
+git clone https://github.com/fohy/finance_tracker.git ~/finance_tracker
+cd ~/finance_tracker
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+mkdir -p ~/.config/finflow instance backups
+python3.12 -c 'import secrets; print(secrets.token_urlsafe(64))' > ~/.config/finflow/secret_key
+chmod 600 ~/.config/finflow/secret_key
+```
+
+Для приватного GitHub-репозитория используйте GitHub Personal Access Token или
+deploy key при клонировании. Пароль от почты или GitHub в команды не вставляйте.
+
+### 2. Web App
+
+На вкладке **Web** создайте Manual configuration для Python 3.12 и укажите:
+
+```text
+Source code:        /home/<username>/finance_tracker
+Working directory: /home/<username>/finance_tracker
+Virtualenv:         /home/<username>/finance_tracker/.venv
+```
+
+Откройте WSGI configuration file и замените содержимое кодом из
+`deploy/pythonanywhere_wsgi.py`. Затем нажмите **Reload**. В production приложение
+не запустится с тестовым `SECRET_KEY`, cookie автоматически будут Secure.
+
+### 3. Первый закрытый пользователь
+
+В Bash console выполните:
+
+```bash
+cd ~/finance_tracker
+.venv/bin/flask --app app create-user --login sasha --person Саша --admin
+```
+
+Пароль вводится интерактивно и не сохраняется в shell history. Публичной
+регистрации нет.
+
+### 4. Резервные копии
+
+В Tasks добавьте ежедневную команду:
+
+```bash
+/home/<username>/finance_tracker/.venv/bin/python /home/<username>/finance_tracker/scripts/backup_db.py
+```
+
+Хранятся последние 14 копий в приватном `~/finance_tracker/backups`. Папка также
+исключена из Git.
+
+### 5. Обновление
+
+На бесплатном PythonAnywhere выполните одну команду в Bash console:
+
+```bash
+~/finance_tracker/scripts/update_pythonanywhere.sh
+```
+
+Скрипт сначала создаёт backup, затем обновляет код и зависимости. Если на странице
+**Account → API Token** уже создан токен и новая Bash console видит `$API_TOKEN`,
+скрипт сам перезагрузит Web App. Иначе останется нажать **Reload** на вкладке Web.
+Миграции additive и применяются при старте.
+
+## Автоматический CI/CD после push
+
+Workflow `.github/workflows/deploy-pythonanywhere.yml` запускается только после
+успешных тестов ветки `main`. Он делает приватную резервную копию базы, переносит
+код через SSH, устанавливает зависимости и перезагружает Web App через API.
+
+По умолчанию workflow выключен. Он не создаёт красных failed jobs на бесплатном
+аккаунте. Для платного аккаунта добавьте repository variable
+`ENABLE_PYTHONANYWHERE_DEPLOY=true`, затем secrets ниже.
+
+SSH на PythonAnywhere доступен только платным аккаунтам. Один раз выполните:
+
+1. На своём компьютере создайте отдельный deploy key:
+
+   ```bash
+   ssh-keygen -t ed25519 -C finflow-deploy -f finflow_pythonanywhere
+   ```
+
+2. Добавьте содержимое `finflow_pythonanywhere.pub` в
+   `~/.ssh/authorized_keys` на PythonAnywhere.
+3. В GitHub откройте **Settings → Secrets and variables → Actions** и добавьте:
+
+   | Secret | Значение |
+   |---|---|
+   | `PA_USERNAME` | username PythonAnywhere, не email |
+   | `PA_DOMAIN` | `username.pythonanywhere.com` |
+   | `PA_API_TOKEN` | токен со вкладки PythonAnywhere **Account → API Token** |
+   | `PA_SSH_PRIVATE_KEY` | полное содержимое файла `finflow_pythonanywhere` |
+
+Для EU-аккаунта дополнительно задайте `PA_SSH_HOST=ssh.eu.pythonanywhere.com` и
+`PA_API_BASE=https://eu.pythonanywhere.com`. Для обычного US-аккаунта эти два
+необязательных secret не нужны.
+
+После этого каждый `push` в `main` автоматически проходит тесты и выкатывается.
+`instance/`, `.env`, `backups/` и `.venv/` явно исключены из `rsync --delete`,
+поэтому production-база никогда не отправляется в GitHub и не удаляется deploy'ем.
