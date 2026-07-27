@@ -72,7 +72,7 @@
         if (['POST', 'PUT', 'PATCH', 'DELETE'].includes((config.method || 'GET').toUpperCase())) {
             config.headers['X-CSRF-Token'] = document.querySelector('meta[name="csrf-token"]')?.content || '';
         }
-        if (config.body && typeof config.body !== 'string') {
+        if (config.body && typeof config.body !== 'string' && !(config.body instanceof FormData)) {
             config.headers['Content-Type'] = 'application/json';
             config.body = JSON.stringify(config.body);
         }
@@ -87,6 +87,10 @@
         const prefix = sign && number > 0 ? '+' : '';
         const currency = state.bootstrap?.settings?.currency || '₽';
         return `${prefix}${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(number)} ${currency}`;
+    }
+
+    function nativeMoney(value, code) {
+        return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(Number(value || 0))} ${escapeHtml(code || '')}`;
     }
 
     function applyRuntimeSettings() {
@@ -148,14 +152,15 @@
         return head + state.bootstrap.people.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
     }
 
-    function accountOptions(kind = null) {
+    function accountOptions(kind = null, includeCurrency = true) {
         return state.bootstrap.accounts
-            .filter(a => !kind || a.account_type === kind)
-            .map(a => `<option value="${a.id}">${escapeHtml(a.name)} · ${money(a.balance)}</option>`).join('');
+            .filter(a => (!kind || a.account_type === kind) && (includeCurrency || a.account_type !== 'currency'))
+            .map(a => `<option value="${a.id}">${escapeHtml(a.name)} · ${a.account_type === 'currency' ? nativeMoney(a.balance, a.currency_code) : money(a.balance)}</option>`).join('');
     }
 
-    function categoryOptions(type) {
-        return state.bootstrap.categories
+    function categoryOptions(type, includeAutomatic = false) {
+        const automatic = includeAutomatic ? '<option value="">Определить автоматически</option>' : '';
+        return automatic + state.bootstrap.categories
             .filter(c => c.type === type)
             .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
     }
@@ -165,8 +170,15 @@
         if (!form) return;
         form.tx_date.value = state.bootstrap.today;
         form.person_id.innerHTML = personOptions(false);
-        form.account_id.innerHTML = accountOptions();
+        form.account_id.innerHTML = accountOptions(null, false);
         form.target_account_id.innerHTML = accountOptions();
+        const targetAmountField = $('#targetAmountField');
+        const syncTargetAmount = () => {
+            const target = state.bootstrap.accounts.find(account => account.id === Number(form.target_account_id.value));
+            targetAmountField.classList.toggle('hidden', form.tx_type.value !== 'transfer' || target?.account_type !== 'currency');
+            targetAmountField.firstChild.textContent = target?.account_type === 'currency'
+                ? `Сумма зачисления, ${target.currency_code} ` : 'Сумма зачисления ';
+        };
 
         const setType = type => {
             form.tx_type.value = type;
@@ -182,17 +194,22 @@
                 targetField.classList.remove('hidden');
                 form.category_id.required = false;
                 form.target_account_id.required = true;
-                form.account_id.innerHTML = accountOptions();
+                form.account_id.innerHTML = accountOptions(null, false);
                 form.target_account_id.innerHTML = accountOptions();
+                syncTargetAmount();
             } else {
                 categoryField.classList.remove('hidden');
                 targetField.classList.add('hidden');
-                form.category_id.required = true;
+                form.category_id.required = false;
                 form.target_account_id.required = false;
-                form.category_id.innerHTML = categoryOptions(type);
-                form.account_id.innerHTML = accountOptions();
+                form.category_id.innerHTML = categoryOptions(type, true);
+                form.account_id.innerHTML = accountOptions(null, false);
+                targetAmountField.classList.add('hidden');
+                form.target_amount.value = '';
             }
         };
+
+        form.target_account_id.addEventListener('change', syncTargetAmount);
 
         $$('[data-tx-type]', form).forEach(btn => btn.addEventListener('click', () => setType(btn.dataset.txType)));
         $$('[data-open-transaction]').forEach(btn => btn.addEventListener('click', () => {
@@ -634,23 +651,25 @@
         const data = await api('/api/goals');
         const priorityLabels = { high: 'Высокий', medium: 'Средний', low: 'Низкий' };
         $('#goalsGrid').innerHTML = data.length ? data.map(item => `<article class="card entity-card">
-            <div class="entity-top"><div class="entity-title"><div class="card-kicker">Накопительная цель · ${escapeHtml(item.person_name || 'Общая')}</div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.note || 'Без заметки')}</p></div><span class="priority ${item.priority}">${priorityLabels[item.priority] || escapeHtml(item.priority)}</span></div>
+            <div class="entity-top"><div class="entity-title"><div class="card-kicker">Накопительная цель · ${escapeHtml(item.person_name || 'Общая')}</div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.note || 'Без заметки')}${item.account_name ? ` · счёт «${escapeHtml(item.account_name)}»` : ''}</p></div><span class="priority ${item.priority}">${priorityLabels[item.priority] || escapeHtml(item.priority)}</span></div>
             <div class="entity-amount">${money(item.target_amount)}</div>
             <div class="entity-progress"><div class="meta"><span>Достигнуто ${money(item.current_amount)}</span><span>${item.progress}%</span></div><div class="progress-track"><i style="width:${item.progress}%;background:var(--primary)"></i></div></div>
             <div class="entity-stats"><div><span>Осталось</span><strong>${money(item.remaining)}</strong></div><div><span>Нужно в месяц</span><strong>${money(item.monthly_needed)}</strong></div><div><span>Срок</span><strong>${formatDate(item.target_date)}</strong></div><div><span>До цели</span><strong>${item.days_left} дн.</strong></div></div>
-            <div class="entity-footer"><button class="btn btn-secondary" data-fund-goal="${item.id}" data-current="${item.current_amount}">Добавить прогресс</button><button class="btn btn-ghost" data-delete-goal="${item.id}">Удалить</button></div>
+            <div class="entity-footer">${item.account_id ? '<span class="muted">Прогресс равен балансу связанного счёта</span>' : `<button class="btn btn-secondary" data-fund-goal="${item.id}" data-current="${item.current_amount}">Добавить прогресс</button>`}<button class="btn btn-ghost" data-delete-goal="${item.id}">Удалить</button></div>
         </article>`).join('') : '<div class="card empty-state">Создайте первую финансовую цель</div>';
         $$('[data-fund-goal]').forEach(btn => btn.addEventListener('click', () => fundEntity('goals', btn.dataset.fundGoal, Number(btn.dataset.current), loadGoals, 'current_amount')));
         $$('[data-delete-goal]').forEach(btn => btn.addEventListener('click', () => deleteEntity('goals', btn.dataset.deleteGoal, loadGoals)));
     }
 
     function openGoalForm() {
+        const goalAccounts = state.bootstrap.accounts.filter(account => ['savings', 'deposit', 'currency', 'investment'].includes(account.account_type));
         openEntityForm('Новая цель', `
             <label>Название<input name="title" required placeholder="Например: финансовая подушка"></label>
             <label>Целевая сумма<input name="target_amount" type="number" min="1" required></label>
             <label>Уже накоплено<input name="current_amount" type="number" min="0" value="0"></label>
             <label>Срок<input name="target_date" type="date"></label>
             <label>Чья цель<select name="person_id">${personOptions(false)}</select></label>
+            <label>Связанный счёт<select name="account_id"><option value="">Без связи</option>${goalAccounts.map(account => `<option value="${account.id}">${escapeHtml(account.name)}</option>`).join('')}</select></label>
             <label>Приоритет<select name="priority"><option value="high">Высокий</option><option value="medium" selected>Средний</option><option value="low">Низкий</option></select></label>
             <label>Описание<textarea name="note" rows="3"></textarea></label>`, async data => {
             try { await api('/api/goals', { method: 'POST', body: data }); toast('Цель создана'); closeModals(); loadGoals(); }
@@ -714,7 +733,9 @@
         openEntityForm(editing ? 'Настроить счёт' : 'Новый счёт', `
             <label>Название<input name="name" value="${escapeHtml(account?.name || '')}" required placeholder="Например: Подушка безопасности"></label>
             <label>Тип счёта<select name="account_type">${accountTypeOptions(account?.account_type)}</select></label>
-            <label>Годовая ставка, %<input name="annual_rate" type="number" min="0" max="100" step="0.01" value="${Number(account?.annual_rate || 0)}"><small>Используется для накопительных счетов, вкладов и инвестиций.</small></label>`, async data => {
+            <label>Годовая ставка, %<input name="annual_rate" type="number" min="0" max="100" step="0.01" value="${Number(account?.annual_rate || 0)}"><small>Используется для накопительных счетов, вкладов и инвестиций.</small></label>
+            <label>Код валюты<input name="currency_code" maxlength="3" value="${escapeHtml(account?.currency_code || state.bootstrap.settings.base_currency_code || 'RUB')}" placeholder="USD"><small>Для валютного счёта.</small></label>
+            <label>Курс к основной валюте<input name="exchange_rate" type="number" min="0.000001" step="0.000001" value="${Number(account?.exchange_rate || 1)}"><small>Сколько основной валюты стоит одна единица валюты счёта.</small></label>`, async data => {
             try {
                 await api(editing ? `/api/accounts/${account.id}` : '/api/accounts', { method: editing ? 'PATCH' : 'POST', body: data });
                 toast(editing ? 'Счёт обновлён' : 'Счёт добавлен');
@@ -765,8 +786,8 @@
         if (accountList) {
             accountList.innerHTML = accounts.length ? accounts.map(account => `<article class="account-setting-row ${account.is_active ? '' : 'is-inactive'}">
                 <div class="account-setting-icon">${iconSvg(accountTypeIcons[account.account_type] || 'account-checking')}</div>
-                <div class="account-setting-main"><div><strong>${escapeHtml(account.name)}</strong><span>${accountTypeLabels[account.account_type] || 'Счёт'}${account.is_active ? '' : ' · отключён'}</span></div><b>${money(account.balance)}</b></div>
-                <div class="account-setting-meta"><span>${Number(account.annual_rate).toFixed(2)}% годовых</span></div>
+                <div class="account-setting-main"><div><strong>${escapeHtml(account.name)}</strong><span>${accountTypeLabels[account.account_type] || 'Счёт'}${account.is_active ? '' : ' · отключён'}</span></div><b>${account.account_type === 'currency' ? `${nativeMoney(account.balance, account.currency_code)} · ${money(account.base_equivalent)}` : money(account.balance)}</b></div>
+                <div class="account-setting-meta"><span>${account.account_type === 'currency' ? `курс ${Number(account.exchange_rate).toFixed(4)}` : `${Number(account.annual_rate).toFixed(2)}% годовых`}</span></div>
                 <div class="account-setting-actions"><button class="btn btn-ghost" data-edit-account="${account.id}">${iconSvg('edit')}Настроить</button><button class="btn btn-ghost" data-toggle-account="${account.id}" data-active="${account.is_active}">${account.is_active ? 'Отключить' : 'Включить'}</button><button class="delete-btn" data-delete-account="${account.id}" aria-label="Удалить счёт ${escapeHtml(account.name)}">${iconSvg('trash')}</button></div>
             </article>`).join('') : '<div class="empty-state">Добавьте первый счёт</div>';
             $$('[data-edit-account]', accountList).forEach(button => button.addEventListener('click', () => openAccountForm(accounts.find(account => account.id === Number(button.dataset.editAccount)))));
@@ -813,7 +834,7 @@
             <label>Первая дата<input name="next_date" type="date" value="${state.bootstrap.today}" required></label>
             <label id="recurringCategoryField">Категория<select name="category_id" required>${categoryOptions('expense')}</select></label>
             <label>Кто<select name="person_id">${personOptions(false)}</select></label>
-            <label>Счёт<select name="account_id">${accountOptions()}</select></label>
+            <label>Счёт<select name="account_id">${accountOptions(null, false)}</select></label>
             <label id="recurringTargetField" class="hidden">Счёт назначения<select name="target_account_id">${accountOptions()}</select></label>
             <label>Заметка<textarea name="note"></textarea></label>`, async data => {
             try {
@@ -843,6 +864,116 @@
         syncFields();
     }
 
+    async function loadAutomation() {
+        const [rules, plan] = await Promise.all([api('/api/category-rules'), api('/api/salary-plan')]);
+        const form = $('#importForm');
+        if (form && !form.dataset.ready) {
+            form.dataset.ready = '1';
+            form.account_id.innerHTML = accountOptions(null, false);
+            form.person_id.innerHTML = personOptions(false);
+            form.addEventListener('submit', async event => {
+                event.preventDefault();
+                try {
+                    const data = await api('/api/imports/preview', { method: 'POST', body: new FormData(form) });
+                    const errors = data.errors.map(item => `<div class="list-row is-warning"><span>Строка ${item.row_number}</span><strong>${escapeHtml(item.error)}</strong></div>`).join('');
+                    $('#importPreview').innerHTML = `<p class="muted">Корректно: ${data.valid_rows} из ${data.total_rows}${data.preview_limited ? ' · показаны первые 100' : ''}</p>` + data.items.map(item => `<div class="list-row ${item.duplicate ? 'is-muted' : ''}"><span>${formatDate(item.tx_date)} · ${escapeHtml(item.note || 'Без описания')}</span><strong>${item.tx_type === 'expense' ? '−' : '+'}${money(item.amount)}${item.duplicate ? ' · дубль' : ''}</strong></div>`).join('') + errors;
+                    $('#confirmImport').disabled = false;
+                } catch (error) { toast(error.message, 'error'); }
+            });
+            $('#confirmImport').addEventListener('click', async () => {
+                if (!confirm('Импортировать показанные корректные операции?')) return;
+                try {
+                    const result = await api('/api/imports/confirm', { method: 'POST', body: new FormData(form) });
+                    toast(`Импортировано: ${result.imported}, пропущено: ${result.skipped}`);
+                    $('#confirmImport').disabled = true;
+                    await refreshBootstrap();
+                    await loadAutomation();
+                } catch (error) { toast(error.message, 'error'); }
+            });
+        }
+        const labels = { spending: 'Оставить на жизнь', savings: 'Перевести в накопления', currency: 'Перевести в валютный резерв' };
+        $('#salaryChecklist').innerHTML = plan.buckets.map(bucket => `<div class="list-row"><span>${labels[bucket.key]}</span><strong>${money(bucket.remaining)}</strong></div>`).join('') + `<p class="muted">${escapeHtml(plan.advice)}</p>`;
+        const applyButton = $('#applySalaryPlan');
+        if (applyButton && !applyButton.dataset.ready) {
+            applyButton.dataset.ready = '1';
+            applyButton.addEventListener('click', async () => {
+                if (!confirm('Создать только недостающие переводы зарплатного плана?')) return;
+                try {
+                    const result = await api('/api/salary-plan/apply', { method: 'POST', body: { confirm: true } });
+                    toast(`Создано переводов: ${result.created.length}`);
+                    await refreshBootstrap();
+                    loadAutomation();
+                } catch (error) { toast(error.message, 'error'); }
+            });
+        }
+        const ruleForm = $('#categoryRuleForm');
+        if (ruleForm) {
+            ruleForm.category_id.innerHTML = state.bootstrap.categories.map(category => `<option value="${category.id}">${escapeHtml(category.name)} · ${category.type === 'expense' ? 'расход' : 'доход'}</option>`).join('');
+            if (!ruleForm.dataset.ready) {
+                ruleForm.dataset.ready = '1';
+                ruleForm.addEventListener('submit', async event => {
+                    event.preventDefault();
+                    try { await api('/api/category-rules', { method: 'POST', body: Object.fromEntries(new FormData(ruleForm).entries()) }); ruleForm.reset(); toast('Правило добавлено'); loadAutomation(); }
+                    catch (error) { toast(error.message, 'error'); }
+                });
+            }
+        }
+        $('#categoryRules').innerHTML = rules.length ? rules.map(rule => `<div class="list-row ${rule.is_active ? '' : 'is-muted'}"><span>«${escapeHtml(rule.pattern)}» → ${escapeHtml(rule.category_name)} <small>приоритет ${rule.priority}</small></span><span class="row-buttons"><button class="btn btn-ghost" data-edit-rule="${rule.id}">${iconSvg('edit')}Изменить</button><button class="btn btn-ghost" data-toggle-rule="${rule.id}" data-active="${rule.is_active}">${rule.is_active ? 'Пауза' : 'Включить'}</button><button class="delete-btn" data-delete-rule="${rule.id}" aria-label="Удалить правило">${iconSvg('trash')}</button></span></div>`).join('') : '<div class="empty-state">Правил пока нет</div>';
+        $$('[data-edit-rule]').forEach(button => button.addEventListener('click', () => {
+            const rule = rules.find(item => item.id === Number(button.dataset.editRule));
+            const options = state.bootstrap.categories.map(category => `<option value="${category.id}" ${category.id === rule.category_id ? 'selected' : ''}>${escapeHtml(category.name)} · ${category.type === 'expense' ? 'расход' : 'доход'}</option>`).join('');
+            openEntityForm('Изменить правило', `<label>Текст в описании<input name="pattern" value="${escapeHtml(rule.pattern)}" required maxlength="200"></label><label>Категория<select name="category_id">${options}</select></label><label>Приоритет<input name="priority" type="number" min="0" max="10000" value="${rule.priority}" required></label>`, async data => {
+                try { await api(`/api/category-rules/${rule.id}`, { method: 'PATCH', body: data }); toast('Правило обновлено'); closeModals(); loadAutomation(); }
+                catch (error) { toast(error.message, 'error'); }
+            });
+        }));
+        $$('[data-toggle-rule]').forEach(button => button.addEventListener('click', async () => { await api(`/api/category-rules/${button.dataset.toggleRule}`, { method: 'PATCH', body: { is_active: button.dataset.active !== '1' } }); loadAutomation(); }));
+        $$('[data-delete-rule]').forEach(button => button.addEventListener('click', async () => { if (confirm('Удалить правило?')) { await api(`/api/category-rules/${button.dataset.deleteRule}`, { method: 'DELETE' }); loadAutomation(); } }));
+        await loadUpcoming();
+    }
+
+    async function loadUpcoming() {
+        const days = $('#upcomingDays')?.value || 30;
+        const data = await api(`/api/upcoming-payments?days=${days}`);
+        const container = $('#upcomingTimeline');
+        if (!container) return;
+        const total = Object.values(data.totals_by_month).reduce((sum, value) => sum + Number(value), 0);
+        container.innerHTML = data.items.length ? `<p class="muted">Обязательные расходы: ${money(total)}</p>` + data.items.map(item => `<div class="list-row ${item.status === 'overdue' ? 'is-warning' : ''}"><span>${formatDate(item.date)} · ${escapeHtml(item.title)}${item.status === 'overdue' ? ' · просрочено' : ''}</span><strong>${money(item.amount)}</strong></div>`).join('') : '<div class="empty-state">Платежей на выбранном горизонте нет</div>';
+        if (!$('#upcomingDays').dataset.ready) {
+            $('#upcomingDays').dataset.ready = '1';
+            $('#upcomingDays').addEventListener('change', loadUpcoming);
+        }
+    }
+
+    async function submitScenario(form) {
+        try {
+            const result = await api('/api/insights/what-if', { method: 'POST', body: Object.fromEntries(new FormData(form).entries()) });
+            $('#scenarioResult').innerHTML = `<div><span>На жизнь</span><strong>${money(result.allocation.life)}</strong></div><div><span>В накопления</span><strong>${money(result.allocation.savings)}</strong></div><div><span>В валюту</span><strong>${money(result.allocation.currency)}</strong></div><div><span>Капитал через ${result.inputs.horizon_months} мес.</span><strong>${money(result.projected_capital)}</strong></div>`;
+        } catch (error) { toast(error.message, 'error'); }
+    }
+
+    async function loadInsights() {
+        const [insights, report, summary] = await Promise.all([api('/api/insights'), api('/api/weekly-report'), api('/api/summary?period=month')]);
+        const cushion = insights.cushion;
+        $('#cushionRunway').textContent = `${cushion.runway_months} мес. запаса`;
+        $('#cushionDetails').innerHTML = `<div class="list-row"><span>Резерв</span><strong>${money(cushion.amount)}</strong></div><div class="list-row"><span>Средние траты в месяц</span><strong>${money(cushion.monthly_burn)}</strong></div><div class="list-row"><span>До цели 3 месяца</span><strong>${money(cushion.gap_3)}</strong></div><div class="list-row"><span>До цели 6 месяцев</span><strong>${money(cushion.gap_6)}</strong></div>`;
+        $('#anomalyList').innerHTML = insights.anomalies.length ? insights.anomalies.map(item => `<div class="list-row is-warning"><span>${escapeHtml(item.category_name)} · ${item.kind === 'large_transaction' ? 'крупная операция' : 'рост к среднему'}</span><strong>${money(item.amount || item.current_amount)}</strong></div>`).join('') : '<div class="empty-state">Материальных отклонений не найдено</div>';
+        const weeklyMetric = (label, key) => `<div><span>${label} · ${report.deltas[key] >= 0 ? '+' : ''}${report.deltas[key]}% к прошлой</span><strong>${money(report.current_week[key])}</strong></div>`;
+        $('#weeklyReport').innerHTML = `<p class="muted">${formatDate(report.current_week.start)} — ${formatDate(report.current_week.end)}</p><div class="result-strip">${weeklyMetric('Доход', 'income')}${weeklyMetric('Расход', 'expense')}${weeklyMetric('Накоплено', 'saved')}${weeklyMetric('В валюту', 'currency_reserved')}</div><h3 class="section-title">Главные категории</h3><div class="compact-list">${report.top_categories.length ? report.top_categories.map(category => `<div class="list-row"><span>${escapeHtml(category.name || 'Без категории')}</span><strong>${money(category.amount)}</strong></div>`).join('') : '<div class="empty-state">Расходов на этой неделе нет</div>'}</div><h3 class="section-title">Три действия</h3><ol class="action-list">${report.actions.map(action => `<li>${escapeHtml(action)}</li>`).join('')}</ol>`;
+        const form = $('#whatIfForm');
+        if (!form.dataset.ready) {
+            form.dataset.ready = '1';
+            form.income.value = summary.current.income || summary.forecast.income || 0;
+            form.expense.value = summary.current.expense || summary.forecast.expense || state.bootstrap.settings.monthly_life_budget;
+            form.savings_percent.value = state.bootstrap.settings.investment_target_percent;
+            form.currency_percent.value = state.bootstrap.settings.currency_target_percent;
+            form.addEventListener('submit', event => { event.preventDefault(); submitScenario(form); });
+            let timer;
+            form.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { if (form.reportValidity()) submitScenario(form); }, 300); });
+            submitScenario(form);
+        }
+    }
+
     async function refreshBootstrap() {
         state.bootstrap = await api('/api/bootstrap');
         applyRuntimeSettings();
@@ -856,9 +987,9 @@
         const form = $('#transactionForm');
         if (form) {
             form.person_id.innerHTML = personOptions(false);
-            form.account_id.innerHTML = accountOptions();
+            form.account_id.innerHTML = accountOptions(null, false);
             form.target_account_id.innerHTML = accountOptions();
-            form.category_id.innerHTML = categoryOptions(form.tx_type.value || 'expense');
+            form.category_id.innerHTML = categoryOptions(form.tx_type.value || 'expense', true);
         }
     }
 
@@ -875,6 +1006,8 @@
                 people: loadPeople,
                 settings: loadSettings,
                 recurring: loadRecurring,
+                automation: loadAutomation,
+                insights: loadInsights,
             };
             await loaders[state.page]?.();
         } catch (error) {

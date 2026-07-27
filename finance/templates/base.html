@@ -25,6 +25,8 @@
             <a class="nav-item {{ 'active' if page == 'dashboard' }}" {% if page == 'dashboard' %}aria-current="page"{% endif %} href="/"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-home"></use></svg></span><span>Обзор</span></a>
             <a class="nav-item {{ 'active' if page == 'transactions' }}" {% if page == 'transactions' %}aria-current="page"{% endif %} href="/transactions"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-transactions"></use></svg></span><span>Операции</span></a>
             <a class="nav-item {{ 'active' if page == 'recurring' }}" {% if page == 'recurring' %}aria-current="page"{% endif %} href="/recurring"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-repeat"></use></svg></span><span>Регулярные</span></a>
+            <a class="nav-item {{ 'active' if page == 'automation' }}" {% if page == 'automation' %}aria-current="page"{% endif %} href="/automation"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-repeat"></use></svg></span><span>Автоматизация</span></a>
+            <a class="nav-item {{ 'active' if page == 'insights' }}" {% if page == 'insights' %}aria-current="page"{% endif %} href="/insights"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-trend"></use></svg></span><span>Выводы</span></a>
             <a class="nav-item {{ 'active' if page == 'investments' }}" {% if page == 'investments' %}aria-current="page"{% endif %} href="/investments"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-trend"></use></svg></span><span>Инвестиции</span></a>
             <a class="nav-item {{ 'active' if page == 'purchases' }}" {% if page == 'purchases' %}aria-current="page"{% endif %} href="/purchases"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-bag"></use></svg></span><span>План покупок</span></a>
             <a class="nav-item {{ 'active' if page == 'goals' }}" {% if page == 'goals' %}aria-current="page"{% endif %} href="/goals"><span class="nav-icon"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-target"></use></svg></span><span>Накопительные цели</span></a>
@@ -79,7 +81,7 @@
                 <input name="tx_date" type="date" required>
             </label>
             <label id="categoryField">Категория
-                <select name="category_id" required></select>
+                <select name="category_id"></select>
             </label>
             <label>Кто
                 <select name="person_id"></select>
@@ -89,6 +91,9 @@
             </label>
             <label id="targetAccountField" class="hidden">Куда перевести
                 <select name="target_account_id"></select>
+            </label>
+            <label id="targetAmountField" class="hidden">Сумма зачисления
+                <input name="target_amount" type="number" min="0.01" step="0.01" placeholder="Рассчитается по курсу">
             </label>
             <label class="span-2">Пометка
                 <textarea name="note" rows="3" placeholder="Например: продукты на неделю"></textarea>

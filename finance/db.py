@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     balance REAL NOT NULL DEFAULT 0,
     annual_rate REAL NOT NULL DEFAULT 0,
     last_accrual_date TEXT NOT NULL DEFAULT (date('now')),
-    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    currency_code TEXT NOT NULL DEFAULT 'RUB',
+    exchange_rate REAL NOT NULL DEFAULT 1 CHECK(exchange_rate > 0)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -66,6 +68,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
     target_account_id INTEGER REFERENCES accounts(id) ON DELETE RESTRICT,
     note TEXT NOT NULL DEFAULT '',
+    target_amount REAL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -78,7 +81,8 @@ CREATE TABLE IF NOT EXISTS goals (
     person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
     priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high')),
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','done','paused')),
-    note TEXT NOT NULL DEFAULT ''
+    note TEXT NOT NULL DEFAULT '',
+    account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS purchases (
@@ -121,6 +125,33 @@ CREATE TABLE IF NOT EXISTS recurring_transactions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS category_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern TEXT NOT NULL,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    priority INTEGER NOT NULL DEFAULT 100,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    imported_count INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS imported_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+    transaction_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     action TEXT NOT NULL,
@@ -136,6 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(tx_type);
 CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_login_attempts_login_time ON login_attempts(login, created_at);
 CREATE INDEX IF NOT EXISTS idx_recurring_next_date ON recurring_transactions(next_date, is_active);
+CREATE INDEX IF NOT EXISTS idx_category_rules_priority ON category_rules(is_active, priority, id);
+CREATE INDEX IF NOT EXISTS idx_import_batches_created ON import_batches(created_at);
 """
 
 
@@ -230,6 +263,7 @@ def init_db(seed_demo: bool = True) -> None:
         "currency_target_percent": "10",
         "monthly_life_budget": "90000",
         "currency": "₽",
+        "base_currency_code": "RUB",
     }
     for key, value in defaults.items():
         db.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
@@ -252,6 +286,19 @@ def _apply_compatible_schema_changes(db: sqlite3.Connection) -> None:
         db.execute("UPDATE accounts SET account_type = 'investment' WHERE kind = 'investment'")
     if "is_active" not in account_columns:
         db.execute("ALTER TABLE accounts ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+    if "currency_code" not in account_columns:
+        db.execute("ALTER TABLE accounts ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'RUB'")
+    if "exchange_rate" not in account_columns:
+        db.execute("ALTER TABLE accounts ADD COLUMN exchange_rate REAL NOT NULL DEFAULT 1")
+
+    transaction_columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
+    if "target_amount" not in transaction_columns:
+        db.execute("ALTER TABLE transactions ADD COLUMN target_amount REAL")
+        db.execute("UPDATE transactions SET target_amount = amount WHERE tx_type = 'transfer'")
+
+    goal_columns = {row["name"] for row in db.execute("PRAGMA table_info(goals)")}
+    if "account_id" not in goal_columns:
+        db.execute("ALTER TABLE goals ADD COLUMN account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL")
 
 
 def _seed_demo(db: sqlite3.Connection) -> None:

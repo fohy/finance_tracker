@@ -48,6 +48,32 @@ def account_rate(value: Any, account_type: str) -> float:
     return round(rate, 3) if account_type in {"savings", "deposit", "investment"} else 0
 
 
+def account_currency(data: dict[str, Any], account_type: str, current: Any = None) -> tuple[str, float]:
+    db = get_db()
+    base_row = db.execute("SELECT value FROM settings WHERE key = 'base_currency_code'").fetchone()
+    base_code = str(base_row["value"] if base_row else "RUB").upper()
+    if account_type != "currency":
+        return base_code, 1.0
+    code = str(data.get("currency_code", current["currency_code"] if current else base_code)).strip().upper()
+    if len(code) != 3 or not code.isalpha():
+        raise ValueError("Код валюты должен состоять из трёх букв")
+    try:
+        exchange_rate = float(data.get("exchange_rate", current["exchange_rate"] if current else 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Курс валюты должен быть числом") from exc
+    if exchange_rate <= 0:
+        raise ValueError("Курс валюты должен быть больше нуля")
+    return code, round(exchange_rate, 6)
+
+
+def account_dict(row: Any) -> dict[str, Any]:
+    item = dict(row)
+    item["base_equivalent"] = round(
+        float(item["balance"]) * (float(item["exchange_rate"]) if item["account_type"] == "currency" else 1), 2
+    )
+    return item
+
+
 def payload() -> dict[str, Any]:
     return request.get_json(silent=True) or request.form.to_dict()
 
@@ -93,7 +119,7 @@ def bootstrap():
     return ok({
         "people": [dict(r) for r in db.execute("SELECT * FROM people ORDER BY id")],
         "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY type, name")],
-        "accounts": [dict(r) for r in db.execute(
+        "accounts": [account_dict(r) for r in db.execute(
             "SELECT * FROM accounts WHERE is_active = 1 ORDER BY account_type, name"
         )],
         "settings": {r["key"]: r["value"] for r in db.execute("SELECT * FROM settings")},
@@ -201,6 +227,7 @@ def duplicate_transaction(tx_id: int):
         tx_type=row["tx_type"], amount=float(row["amount"]), tx_date=date.today().isoformat(),
         account_id=row["account_id"], target_account_id=row["target_account_id"],
         category_id=row["category_id"], person_id=row["person_id"], note=row["note"],
+        target_amount=row["target_amount"],
         actor_user_id=current_user_id(),
     )
     return ok({"id": transaction_id}, 201)
@@ -238,16 +265,21 @@ def create_transaction():
         raise ValueError("Неверный тип операции")
     amount = as_float(data.get("amount"), "Сумма")
     tx_date = str(data.get("tx_date") or date.today().isoformat())
-    account_id = int(data.get("account_id"))
+    try:
+        account_id = int(data.get("account_id"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Выберите счёт") from exc
     target_account_id = as_int_or_none(data.get("target_account_id"))
     category_id = as_int_or_none(data.get("category_id"))
     person_id = as_int_or_none(data.get("person_id"))
     note = str(data.get("note") or "").strip()
+    target_amount = as_float(data.get("target_amount"), "Сумма зачисления") if data.get("target_amount") not in (None, "") else None
 
     transaction_id = create_transaction_record(
         tx_type=tx_type, amount=amount, tx_date=tx_date, account_id=account_id,
         target_account_id=target_account_id, category_id=category_id,
         person_id=person_id, note=note, actor_user_id=current_user_id(),
+        target_amount=target_amount,
     )
     return ok({"id": transaction_id}, 201)
 
@@ -285,7 +317,7 @@ def create_category():
 @api_bp.get("/accounts")
 def accounts():
     accrue_interest()
-    return ok([dict(r) for r in get_db().execute(
+    return ok([account_dict(r) for r in get_db().execute(
         "SELECT * FROM accounts ORDER BY is_active DESC, account_type, name"
     )])
 
@@ -300,12 +332,15 @@ def create_account():
     if account_type not in ACCOUNT_TYPES:
         raise ValueError("Неизвестный тип счёта")
     rate = account_rate(data.get("annual_rate"), account_type)
+    currency_code, exchange_rate = account_currency(data, account_type)
     db = get_db()
     try:
         cursor = db.execute(
-            """INSERT INTO accounts(name, kind, account_type, balance, annual_rate, last_accrual_date, is_active)
-               VALUES (?, ?, ?, 0, ?, ?, 1)""",
-            (name, account_kind(account_type), account_type, rate, date.today().isoformat()),
+            """INSERT INTO accounts(name, kind, account_type, balance, annual_rate, last_accrual_date,
+                       is_active, currency_code, exchange_rate)
+               VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?)""",
+            (name, account_kind(account_type), account_type, rate, date.today().isoformat(),
+             currency_code, exchange_rate),
         )
         db.commit()
     except Exception as exc:
@@ -319,7 +354,7 @@ def create_account():
 @api_bp.patch("/accounts/<int:account_id>")
 def update_account(account_id: int):
     data = payload()
-    allowed = {"name", "account_type", "annual_rate", "is_active"}
+    allowed = {"name", "account_type", "annual_rate", "is_active", "currency_code", "exchange_rate"}
     updates = {k: data[k] for k in allowed if k in data}
     if not updates:
         raise ValueError("Нет полей для изменения")
@@ -344,6 +379,8 @@ def update_account(account_id: int):
         updates["kind"] = account_kind(account_type)
     if "annual_rate" in updates or "account_type" in updates:
         updates["annual_rate"] = account_rate(updates.get("annual_rate", account["annual_rate"]), account_type)
+    if {"currency_code", "exchange_rate", "account_type"} & updates.keys():
+        updates["currency_code"], updates["exchange_rate"] = account_currency(updates, account_type, account)
     if "is_active" in updates:
         updates["is_active"] = int(str(updates["is_active"]).lower() in {"1", "true", "yes", "on"})
         if not updates["is_active"] and abs(float(account["balance"])) > 0.005:
@@ -385,8 +422,10 @@ def delete_account(account_id: int):
 @api_bp.get("/goals")
 def list_goals():
     rows = get_db().execute(
-        """SELECT g.*, p.name person_name, p.avatar_color
+        """SELECT g.*, p.name person_name, p.avatar_color, a.name account_name,
+                  a.balance account_balance, a.exchange_rate account_exchange_rate
            FROM goals g LEFT JOIN people p ON p.id=g.person_id
+           LEFT JOIN accounts a ON a.id = g.account_id
            ORDER BY CASE g.status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
                     CASE g.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, g.target_date"""
     ).fetchall()
@@ -402,10 +441,17 @@ def create_goal():
     target = as_float(data.get("target_amount"), "Сумма цели")
     current = max(0, float(data.get("current_amount") or 0))
     db = get_db()
+    account_id = as_int_or_none(data.get("account_id"))
+    if account_id and not db.execute(
+        """SELECT 1 FROM accounts WHERE id = ? AND is_active = 1
+           AND account_type IN ('savings','deposit','currency','investment')""", (account_id,)
+    ).fetchone():
+        raise ValueError("Выберите активный накопительный счёт")
     cursor = db.execute(
-        """INSERT INTO goals(title, target_amount, current_amount, target_date, person_id, priority, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (title, target, current, data.get("target_date") or None, as_int_or_none(data.get("person_id")), data.get("priority") or "medium", data.get("note") or ""),
+        """INSERT INTO goals(title, target_amount, current_amount, target_date, person_id, priority, note, account_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (title, target, current, data.get("target_date") or None, as_int_or_none(data.get("person_id")),
+         data.get("priority") or "medium", data.get("note") or "", account_id),
     )
     db.commit()
     return ok({"id": cursor.lastrowid}, 201)
@@ -414,10 +460,18 @@ def create_goal():
 @api_bp.patch("/goals/<int:item_id>")
 def update_goal(item_id: int):
     data = payload()
-    allowed = {"title", "target_amount", "current_amount", "target_date", "person_id", "priority", "status", "note"}
+    allowed = {"title", "target_amount", "current_amount", "target_date", "person_id", "priority", "status", "note", "account_id"}
     updates = {k: data[k] for k in allowed if k in data}
     if not updates:
         raise ValueError("Нет данных для обновления")
+    if "account_id" in updates:
+        updates["account_id"] = as_int_or_none(updates["account_id"])
+        if updates["account_id"] and not get_db().execute(
+            """SELECT 1 FROM accounts WHERE id = ? AND is_active = 1
+               AND account_type IN ('savings','deposit','currency','investment')""",
+            (updates["account_id"],),
+        ).fetchone():
+            raise ValueError("Выберите активный накопительный счёт")
     parts = ", ".join(f"{key} = ?" for key in updates)
     db = get_db()
     db.execute(f"UPDATE goals SET {parts} WHERE id = ?", [*updates.values(), item_id])
@@ -531,8 +585,13 @@ def update_settings():
         raise ValueError("Укажите валюту")
     if "currency" in data:
         data["currency"] = str(data["currency"]).strip()
+    if "base_currency_code" in data:
+        base_code = str(data["base_currency_code"]).strip().upper()
+        if len(base_code) != 3 or not base_code.isalpha():
+            raise ValueError("Код основной валюты должен состоять из трёх букв")
+        data["base_currency_code"] = base_code
     db = get_db()
-    for key in ("investment_target_percent", "currency_target_percent", "monthly_life_budget", "currency"):
+    for key in ("investment_target_percent", "currency_target_percent", "monthly_life_budget", "currency", "base_currency_code"):
         if key in data:
             db.execute(
                 "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

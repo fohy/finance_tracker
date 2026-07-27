@@ -41,3 +41,13 @@ def settings():
 @pages_bp.get("/recurring")
 def recurring():
     return render_template("recurring.html", page="recurring", title="Регулярные операции")
+
+
+@pages_bp.get("/automation")
+def automation():
+    return render_template("automation.html", page="automation", title="Автоматизация")
+
+
+@pages_bp.get("/insights")
+def insights():
+    return render_template("insights.html", page="insights", title="Финансовые выводы")

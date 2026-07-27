@@ -125,9 +125,12 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
     previous["net"] = round(previous["income"] - previous["expense"], 2)
 
     accounts = [dict(r) for r in db.execute("SELECT * FROM accounts ORDER BY is_active DESC, account_type, name")]
+    for account in accounts:
+        rate = float(account.get("exchange_rate") or 1)
+        account["base_equivalent"] = round(float(account["balance"]) * rate, 2)
     life_balance = sum(a["balance"] for a in accounts if a["account_type"] in {"checking", "cash"})
     savings_balance = sum(a["balance"] for a in accounts if a["account_type"] in {"savings", "deposit"})
-    currency_balance = sum(a["balance"] for a in accounts if a["account_type"] == "currency")
+    currency_balance = sum(a["base_equivalent"] for a in accounts if a["account_type"] == "currency")
     investment_balance = sum(a["balance"] for a in accounts if a["account_type"] == "investment")
 
     def delta(key: str) -> float:
@@ -276,6 +279,9 @@ def allocation_plan(
         "target_percent": round(target_percent, 1),
         "currency_percent": round(currency_percent, 1),
         "source_account": source["name"] if source else None,
+        "source_account_id": source["id"] if source else None,
+        "savings_account_id": savings["id"] if savings else None,
+        "currency_account_id": currency["id"] if currency else None,
         "buckets": buckets,
         "advice": advice,
     }
@@ -430,6 +436,10 @@ def available_for_purchases() -> float:
 
 
 def goal_progress(item: dict[str, Any]) -> dict[str, Any]:
+    if item.get("account_id") is not None and item.get("account_balance") is not None:
+        item["current_amount"] = round(
+            float(item["account_balance"]) * float(item.get("account_exchange_rate") or 1), 2
+        )
     remaining = max(0, float(item["target_amount"]) - float(item["current_amount"]))
     target = parse_date(item.get("target_date"), date.today() + timedelta(days=365))
     days = max(1, (target - date.today()).days)
