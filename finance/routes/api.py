@@ -22,6 +22,7 @@ from ..services import (
     period_bounds,
     purchase_plan,
     shift_period,
+    spending_statistics,
     trend_series,
 )
 from ..transaction_service import create_transaction as create_transaction_record
@@ -29,6 +30,22 @@ from ..transaction_service import delete_transaction as delete_transaction_recor
 from ..transaction_service import update_transaction_metadata
 
 api_bp = Blueprint("api", __name__)
+
+ACCOUNT_TYPES = frozenset({"checking", "cash", "savings", "deposit", "currency", "investment"})
+
+
+def account_kind(account_type: str) -> str:
+    return "investment" if account_type == "investment" else "life"
+
+
+def account_rate(value: Any, account_type: str) -> float:
+    try:
+        rate = float(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Годовая ставка должна быть числом") from exc
+    if rate < 0 or rate > 100:
+        raise ValueError("Годовая ставка должна быть от 0 до 100%")
+    return round(rate, 3) if account_type in {"savings", "deposit", "investment"} else 0
 
 
 def payload() -> dict[str, Any]:
@@ -76,7 +93,9 @@ def bootstrap():
     return ok({
         "people": [dict(r) for r in db.execute("SELECT * FROM people ORDER BY id")],
         "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY type, name")],
-        "accounts": [dict(r) for r in db.execute("SELECT * FROM accounts ORDER BY kind")],
+        "accounts": [dict(r) for r in db.execute(
+            "SELECT * FROM accounts WHERE is_active = 1 ORDER BY account_type, name"
+        )],
         "settings": {r["key"]: r["value"] for r in db.execute("SELECT * FROM settings")},
         "today": date.today().isoformat(),
     })
@@ -89,6 +108,7 @@ def summary():
     person_id = as_int_or_none(request.args.get("person_id"))
     data = get_summary(period, anchor, person_id)
     data["breakdown"] = category_breakdown(period, anchor, person_id)
+    data["spending_stats"] = spending_statistics(period, anchor, person_id)
     data["trend"] = trend_series(period, anchor, person_id)
     data["prev_anchor"] = shift_period(period, anchor, -1)
     data["next_anchor"] = shift_period(period, anchor, 1)
@@ -251,7 +271,7 @@ def create_category():
     try:
         cursor = db.execute(
             "INSERT INTO categories(name, type, icon, color, parent_id, is_custom) VALUES (?, ?, ?, ?, ?, 1)",
-            (name, category_type, data.get("icon") or "•", data.get("color") or "#7c5cff", as_int_or_none(data.get("parent_id"))),
+            (name, category_type, data.get("icon") or "category", data.get("color") or "#7c5cff", as_int_or_none(data.get("parent_id"))),
         )
         db.commit()
     except Exception as exc:
@@ -265,31 +285,99 @@ def create_category():
 @api_bp.get("/accounts")
 def accounts():
     accrue_interest()
-    return ok([dict(r) for r in get_db().execute("SELECT * FROM accounts ORDER BY kind")])
+    return ok([dict(r) for r in get_db().execute(
+        "SELECT * FROM accounts ORDER BY is_active DESC, account_type, name"
+    )])
+
+
+@api_bp.post("/accounts")
+def create_account():
+    data = payload()
+    name = str(data.get("name") or "").strip()
+    account_type = str(data.get("account_type") or "checking")
+    if not name:
+        raise ValueError("Введите название счёта")
+    if account_type not in ACCOUNT_TYPES:
+        raise ValueError("Неизвестный тип счёта")
+    rate = account_rate(data.get("annual_rate"), account_type)
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """INSERT INTO accounts(name, kind, account_type, balance, annual_rate, last_accrual_date, is_active)
+               VALUES (?, ?, ?, 0, ?, ?, 1)""",
+            (name, account_kind(account_type), account_type, rate, date.today().isoformat()),
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if "UNIQUE" in str(exc):
+            raise ValueError("Счёт с таким названием уже существует") from exc
+        raise
+    return ok({"id": cursor.lastrowid}, 201)
 
 
 @api_bp.patch("/accounts/<int:account_id>")
 def update_account(account_id: int):
     data = payload()
-    allowed = {"name", "annual_rate"}
+    allowed = {"name", "account_type", "annual_rate", "is_active"}
     updates = {k: data[k] for k in allowed if k in data}
     if not updates:
-        raise ValueError("Можно изменить только название или годовую ставку; баланс меняется операциями")
-    if "name" in updates and not str(updates["name"]).strip():
-        raise ValueError("Название счёта не может быть пустым")
-    if "annual_rate" in updates:
-        try:
-            updates["annual_rate"] = float(updates["annual_rate"])
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Годовая ставка должна быть числом") from exc
-        if updates["annual_rate"] < 0:
-            raise ValueError("Годовая ставка не может быть отрицательной")
-    parts = ", ".join(f"{key} = ?" for key in updates)
+        raise ValueError("Нет полей для изменения")
     db = get_db()
-    cursor = db.execute(f"UPDATE accounts SET {parts} WHERE id = ?", [*updates.values(), account_id])
-    if cursor.rowcount == 0:
-        db.rollback()
+    account = db.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    if not account:
         return fail("Счёт не найден", 404)
+    if "name" in updates:
+        updates["name"] = str(updates["name"]).strip()
+        if not updates["name"]:
+            raise ValueError("Название счёта не может быть пустым")
+    account_type = str(updates.get("account_type", account["account_type"]))
+    if account_type not in ACCOUNT_TYPES:
+        raise ValueError("Неизвестный тип счёта")
+    if account_type != account["account_type"]:
+        has_history = db.execute(
+            "SELECT 1 FROM transactions WHERE account_id = ? OR target_account_id = ? LIMIT 1",
+            (account_id, account_id),
+        ).fetchone()
+        if has_history:
+            raise ValueError("Тип счёта с операциями изменить нельзя")
+        updates["kind"] = account_kind(account_type)
+    if "annual_rate" in updates or "account_type" in updates:
+        updates["annual_rate"] = account_rate(updates.get("annual_rate", account["annual_rate"]), account_type)
+    if "is_active" in updates:
+        updates["is_active"] = int(str(updates["is_active"]).lower() in {"1", "true", "yes", "on"})
+        if not updates["is_active"] and abs(float(account["balance"])) > 0.005:
+            raise ValueError("Сначала переведите остаток с этого счёта")
+    parts = ", ".join(f"{key} = ?" for key in updates)
+    try:
+        db.execute(f"UPDATE accounts SET {parts} WHERE id = ?", [*updates.values(), account_id])
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if "UNIQUE" in str(exc):
+            raise ValueError("Счёт с таким названием уже существует") from exc
+        raise
+    return ok()
+
+
+@api_bp.delete("/accounts/<int:account_id>")
+def delete_account(account_id: int):
+    db = get_db()
+    account = db.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    if not account:
+        return fail("Счёт не найден", 404)
+    if abs(float(account["balance"])) > 0.005:
+        raise ValueError("Нельзя удалить счёт с ненулевым остатком")
+    has_history = db.execute(
+        """SELECT 1 FROM transactions WHERE account_id = ? OR target_account_id = ?
+           UNION ALL
+           SELECT 1 FROM recurring_transactions WHERE account_id = ? OR target_account_id = ?
+           LIMIT 1""",
+        (account_id, account_id, account_id, account_id),
+    ).fetchone()
+    if has_history:
+        raise ValueError("Счёт связан с операциями — его можно только отключить")
+    db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
     db.commit()
     return ok()
 
@@ -425,15 +513,26 @@ def get_settings():
 def update_settings():
     data = payload()
     if "investment_target_percent" in data:
-        target = as_float(data["investment_target_percent"], "Цель инвестирования")
+        target = as_float(data["investment_target_percent"], "Доля накоплений")
         if target > 100:
-            raise ValueError("Цель инвестирования не может быть больше 100%")
+            raise ValueError("Доля накоплений не может быть больше 100%")
+    if "currency_target_percent" in data:
+        currency_target = as_float(data["currency_target_percent"], "Доля валютного резерва")
+        if currency_target > 100:
+            raise ValueError("Доля валютного резерва не может быть больше 100%")
+    current = {row["key"]: row["value"] for row in get_db().execute("SELECT key, value FROM settings")}
+    savings_target = float(data.get("investment_target_percent", current.get("investment_target_percent", 20)))
+    currency_target = float(data.get("currency_target_percent", current.get("currency_target_percent", 10)))
+    if savings_target + currency_target > 100:
+        raise ValueError("Сумма долей накоплений и валютного резерва не может превышать 100%")
     if "monthly_life_budget" in data:
         as_float(data["monthly_life_budget"], "Месячный бюджет")
     if "currency" in data and not str(data["currency"]).strip():
         raise ValueError("Укажите валюту")
+    if "currency" in data:
+        data["currency"] = str(data["currency"]).strip()
     db = get_db()
-    for key in ("investment_target_percent", "monthly_life_budget", "currency"):
+    for key in ("investment_target_percent", "currency_target_percent", "monthly_life_budget", "currency"):
         if key in data:
             db.execute(
                 "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -506,14 +605,32 @@ def create_recurring_transaction():
     if tx_type not in {"income", "expense", "transfer"} or frequency not in {"weekly", "monthly"}:
         raise ValueError("Неверный тип операции или периодичность")
     db = get_db()
+    account_id = as_int_or_none(data.get("account_id"))
+    target_account_id = as_int_or_none(data.get("target_account_id"))
+    category_id = as_int_or_none(data.get("category_id"))
+    if not account_id or not db.execute("SELECT 1 FROM accounts WHERE id = ? AND is_active = 1", (account_id,)).fetchone():
+        raise ValueError("Выберите активный счёт")
+    if tx_type == "transfer":
+        if not target_account_id or not db.execute(
+            "SELECT 1 FROM accounts WHERE id = ? AND is_active = 1", (target_account_id,)
+        ).fetchone():
+            raise ValueError("Выберите активный счёт назначения")
+        if target_account_id == account_id:
+            raise ValueError("Счета перевода должны отличаться")
+        category_id = None
+    else:
+        target_account_id = None
+        category = db.execute("SELECT type FROM categories WHERE id = ?", (category_id,)).fetchone()
+        if not category or category["type"] != tx_type:
+            raise ValueError("Выберите категорию нужного типа")
     cursor = db.execute(
         """INSERT INTO recurring_transactions(title, tx_type, amount, frequency, next_date, category_id,
                    person_id, account_id, target_account_id, note)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (title, tx_type, as_float(data.get("amount"), "Сумма"), frequency,
-         parse_date(data.get("next_date")).isoformat(), as_int_or_none(data.get("category_id")),
-         as_int_or_none(data.get("person_id")), int(data.get("account_id")),
-         as_int_or_none(data.get("target_account_id")), str(data.get("note") or "").strip()),
+         parse_date(data.get("next_date")).isoformat(), category_id,
+         as_int_or_none(data.get("person_id")), account_id,
+         target_account_id, str(data.get("note") or "").strip()),
     )
     db.commit()
     return ok({"id": cursor.lastrowid}, 201)

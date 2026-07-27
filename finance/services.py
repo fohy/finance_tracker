@@ -52,7 +52,7 @@ def accrue_interest() -> None:
     db = get_db()
     today = date.today()
     accounts = db.execute(
-        "SELECT * FROM accounts WHERE kind = 'investment' AND annual_rate > 0"
+        "SELECT * FROM accounts WHERE is_active = 1 AND annual_rate > 0"
     ).fetchall()
     changed = False
     for account in accounts:
@@ -85,13 +85,18 @@ def setting(key: str, default: float = 0) -> float:
         return default
 
 
+def setting_text(key: str, default: str = "") -> str:
+    row = get_db().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row else default
+
+
 def get_summary(period: str, anchor: str | None = None, person_id: int | None = None) -> dict[str, Any]:
     accrue_interest()
     db = get_db()
     start, end = period_bounds(period, anchor)
     prev_start, prev_end = previous_period(start, end)
 
-    person_filter = " AND person_id = ?" if person_id else ""
+    person_filter = " AND t.person_id = ?" if person_id else ""
     params: list[Any] = [start.isoformat(), end.isoformat()]
     prev_params: list[Any] = [prev_start.isoformat(), prev_end.isoformat()]
     if person_id:
@@ -101,12 +106,15 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
     def aggregate(bounds_params: list[Any]) -> dict[str, float]:
         row = db.execute(
             f"""SELECT
-                COALESCE(SUM(CASE WHEN tx_type = 'income' THEN amount ELSE 0 END), 0) AS income,
-                COALESCE(SUM(CASE WHEN tx_type = 'expense' THEN amount ELSE 0 END), 0) AS expense,
-                COALESCE(SUM(CASE WHEN tx_type = 'transfer' THEN amount ELSE 0 END), 0) AS invested,
-                COALESCE(SUM(CASE WHEN tx_type = 'interest' THEN amount ELSE 0 END), 0) AS interest
-            FROM transactions
-            WHERE tx_date BETWEEN ? AND ? {person_filter}""",
+                COALESCE(SUM(CASE WHEN t.tx_type = 'income' THEN t.amount ELSE 0 END), 0) AS income,
+                COALESCE(SUM(CASE WHEN t.tx_type = 'expense' THEN t.amount ELSE 0 END), 0) AS expense,
+                COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.account_type = 'investment' THEN t.amount ELSE 0 END), 0) AS invested,
+                COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.account_type IN ('savings', 'deposit') THEN t.amount ELSE 0 END), 0) AS saved,
+                COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.account_type = 'currency' THEN t.amount ELSE 0 END), 0) AS currency_reserved,
+                COALESCE(SUM(CASE WHEN t.tx_type = 'interest' THEN t.amount ELSE 0 END), 0) AS interest
+            FROM transactions t
+            LEFT JOIN accounts ta ON ta.id = t.target_account_id
+            WHERE t.tx_date BETWEEN ? AND ? {person_filter}""",
             bounds_params,
         ).fetchone()
         return {k: round(float(row[k]), 2) for k in row.keys()}
@@ -116,9 +124,11 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
     current["net"] = round(current["income"] - current["expense"], 2)
     previous["net"] = round(previous["income"] - previous["expense"], 2)
 
-    accounts = [dict(r) for r in db.execute("SELECT * FROM accounts ORDER BY kind")]
-    life_balance = sum(a["balance"] for a in accounts if a["kind"] == "life")
-    investment_balance = sum(a["balance"] for a in accounts if a["kind"] == "investment")
+    accounts = [dict(r) for r in db.execute("SELECT * FROM accounts ORDER BY is_active DESC, account_type, name")]
+    life_balance = sum(a["balance"] for a in accounts if a["account_type"] in {"checking", "cash"})
+    savings_balance = sum(a["balance"] for a in accounts if a["account_type"] in {"savings", "deposit"})
+    currency_balance = sum(a["balance"] for a in accounts if a["account_type"] == "currency")
+    investment_balance = sum(a["balance"] for a in accounts if a["account_type"] == "investment")
 
     def delta(key: str) -> float:
         old = previous[key]
@@ -128,6 +138,7 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
 
     score = correctness_score(current, period, start, end)
     forecast = build_forecast(person_id)
+    allocation = allocation_plan(current, start, end, accounts)
 
     return {
         "period": period,
@@ -139,16 +150,20 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
         "delta": {k: delta(k) for k in ("income", "expense", "net", "invested")},
         "accounts": accounts,
         "life_balance": round(life_balance, 2),
+        "savings_balance": round(savings_balance, 2),
+        "currency_balance": round(currency_balance, 2),
         "investment_balance": round(investment_balance, 2),
+        "total_capital": round(life_balance + savings_balance + currency_balance + investment_balance, 2),
         "score": score,
         "forecast": forecast,
+        "allocation_plan": allocation,
     }
 
 
 def correctness_score(metrics: dict[str, float], period: str, start: date, end: date) -> dict[str, Any]:
     income = metrics["income"]
     expense = metrics["expense"]
-    invested = metrics["invested"]
+    invested = metrics["saved"]
     net = metrics["net"]
     target_pct = setting("investment_target_percent", 20)
     monthly_budget = setting("monthly_life_budget", 90000)
@@ -174,9 +189,12 @@ def correctness_score(metrics: dict[str, float], period: str, start: date, end: 
 
     tips: list[str] = []
     if expense > budget:
-        tips.append(f"Расходы выше планового лимита на {round(expense - budget):,.0f} ₽".replace(",", " "))
+        currency = setting_text("currency", "₽")
+        tips.append(
+            f"Расходы выше планового лимита на {round(expense - budget):,.0f} {currency}".replace(",", " ")
+        )
     if investment_rate < target_pct and income > 0:
-        tips.append(f"До цели инвестирования не хватает {round(target_pct - investment_rate, 1)} п.п.")
+        tips.append(f"До цели накоплений не хватает {round(target_pct - investment_rate, 1)} п.п.")
     if net < 0:
         tips.append("Расходы превышают доходы — сократите необязательные траты")
     if not tips:
@@ -193,20 +211,91 @@ def correctness_score(metrics: dict[str, float], period: str, start: date, end: 
     }
 
 
+def allocation_plan(
+    metrics: dict[str, float], start: date, end: date, accounts: list[dict[str, Any]]
+) -> dict[str, Any]:
+    income = max(0.0, metrics["income"])
+    target_percent = max(0.0, min(100.0, setting("investment_target_percent", 20)))
+    currency_percent = max(0.0, min(100.0 - target_percent, setting("currency_target_percent", 10)))
+    period_days = (end - start).days + 1
+    monthly_limit = setting("monthly_life_budget", 90000)
+    spending_limit = max(0.0, monthly_limit if period_days >= 28 else monthly_limit * period_days / 30.44)
+
+    base_savings = income * target_percent / 100
+    planned_currency = income * currency_percent / 100
+    distributable = max(0.0, income - base_savings - planned_currency)
+    planned_spending = min(spending_limit, distributable)
+    planned_savings = base_savings + max(0.0, distributable - planned_spending)
+
+    def bucket(key: str, label: str, planned: float, actual: float, destination: str | None = None) -> dict[str, Any]:
+        remaining = max(0.0, planned - actual)
+        return {
+            "key": key,
+            "label": label,
+            "planned": round(planned, 2),
+            "actual": round(actual, 2),
+            "remaining": round(remaining, 2),
+            "progress": round(min(100.0, actual / planned * 100), 1) if planned else 0,
+            "over": round(max(0.0, actual - planned), 2),
+            "destination": destination,
+        }
+
+    active_accounts = [account for account in accounts if account["is_active"]]
+    source = next(
+        (account for account in active_accounts if account["account_type"] in {"checking", "cash"}), None
+    )
+    savings = next(
+        (account for account in active_accounts if account["account_type"] in {"savings", "deposit"}), None
+    )
+    currency = next(
+        (account for account in active_accounts if account["account_type"] == "currency"), None
+    )
+    buckets = [
+        bucket("spending", "Можно потратить", planned_spending, metrics["expense"]),
+        bucket(
+            "savings", "На накопительный", planned_savings, metrics["saved"],
+            savings["name"] if savings else None,
+        ),
+        bucket(
+            "currency", "В валютный резерв", planned_currency, metrics["currency_reserved"],
+            currency["name"] if currency else None,
+        ),
+    ]
+    if income <= 0:
+        advice = "Добавьте доходы за выбранный период — после этого появится план распределения."
+    elif buckets[0]["over"] > 0:
+        advice = "Лимит расходов превышен. Сначала сократите необязательные траты, затем пополняйте цели."
+    elif buckets[1]["remaining"] > 0:
+        advice = "Переведите рассчитанную сумму на накопительный счёт."
+    elif buckets[2]["remaining"] > 0:
+        advice = "Накопительный план выполнен — пополните валютный резерв."
+    else:
+        advice = "План распределения на выбранный период выполнен."
+    return {
+        "income": round(income, 2),
+        "target_percent": round(target_percent, 1),
+        "currency_percent": round(currency_percent, 1),
+        "source_account": source["name"] if source else None,
+        "buckets": buckets,
+        "advice": advice,
+    }
+
+
 def build_forecast(person_id: int | None = None) -> dict[str, Any]:
     db = get_db()
-    person_filter = " AND person_id = ?" if person_id else ""
+    person_filter = " AND t.person_id = ?" if person_id else ""
     params: list[Any] = []
     if person_id:
         params.append(person_id)
     rows = db.execute(
-        f"""SELECT substr(tx_date, 1, 7) AS month,
-            SUM(CASE WHEN tx_type='income' THEN amount ELSE 0 END) income,
-            SUM(CASE WHEN tx_type='expense' THEN amount ELSE 0 END) expense,
-            SUM(CASE WHEN tx_type='transfer' THEN amount ELSE 0 END) invested
-        FROM transactions
-        WHERE tx_date >= date('now', '-5 months', 'start of month') {person_filter}
-        GROUP BY substr(tx_date, 1, 7)
+        f"""SELECT substr(t.tx_date, 1, 7) AS month,
+            SUM(CASE WHEN t.tx_type='income' THEN t.amount ELSE 0 END) income,
+            SUM(CASE WHEN t.tx_type='expense' THEN t.amount ELSE 0 END) expense,
+            SUM(CASE WHEN t.tx_type='transfer' AND ta.account_type='investment' THEN t.amount ELSE 0 END) invested
+        FROM transactions t
+        LEFT JOIN accounts ta ON ta.id = t.target_account_id
+        WHERE t.tx_date >= date('now', '-5 months', 'start of month') {person_filter}
+        GROUP BY substr(t.tx_date, 1, 7)
         ORDER BY month""",
         params,
     ).fetchall()
@@ -237,8 +326,9 @@ def category_breakdown(period: str, anchor: str | None, person_id: int | None = 
     if person_id:
         params.append(person_id)
     rows = db.execute(
-        f"""SELECT COALESCE(c.name, 'Без категории') name, COALESCE(c.icon, '•') icon,
-            COALESCE(c.color, '#8b91a7') color, SUM(t.amount) amount
+        f"""SELECT COALESCE(c.name, 'Без категории') name, COALESCE(c.icon, 'category') icon,
+            COALESCE(c.color, '#8b91a7') color, SUM(t.amount) amount,
+            COUNT(*) transaction_count, AVG(t.amount) average_transaction
         FROM transactions t
         LEFT JOIN categories c ON c.id=t.category_id
         WHERE t.tx_type='expense' AND t.tx_date BETWEEN ? AND ? {person_filter}
@@ -247,6 +337,44 @@ def category_breakdown(period: str, anchor: str | None, person_id: int | None = 
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def spending_statistics(period: str, anchor: str | None, person_id: int | None = None) -> dict[str, Any]:
+    db = get_db()
+    start, end = period_bounds(period, anchor)
+    person_filter = " AND t.person_id = ?" if person_id else ""
+    params: list[Any] = [start.isoformat(), end.isoformat()]
+    if person_id:
+        params.append(person_id)
+
+    totals = db.execute(
+        f"""SELECT COUNT(*) transaction_count, COALESCE(SUM(t.amount), 0) total,
+            COALESCE(AVG(t.amount), 0) average_transaction, COUNT(DISTINCT t.tx_date) active_days
+        FROM transactions t
+        WHERE t.tx_type='expense' AND t.tx_date BETWEEN ? AND ? {person_filter}""",
+        params,
+    ).fetchone()
+    largest = db.execute(
+        f"""SELECT t.amount, t.tx_date, COALESCE(c.name, 'Без категории') category_name,
+            COALESCE(c.icon, 'category') category_icon
+        FROM transactions t
+        LEFT JOIN categories c ON c.id = t.category_id
+        WHERE t.tx_type='expense' AND t.tx_date BETWEEN ? AND ? {person_filter}
+        ORDER BY t.amount DESC, t.tx_date DESC, t.id DESC
+        LIMIT 1""",
+        params,
+    ).fetchone()
+    total = float(totals["total"])
+    effective_end = min(end, date.today()) if start <= date.today() else end
+    period_days = max(1, (effective_end - start).days + 1)
+    return {
+        "total": round(total, 2),
+        "average_per_day": round(total / period_days, 2),
+        "average_transaction": round(float(totals["average_transaction"]), 2),
+        "transaction_count": totals["transaction_count"],
+        "active_days": totals["active_days"],
+        "largest": dict(largest) if largest else None,
+    }
 
 
 def trend_series(period: str, anchor: str | None, person_id: int | None = None) -> list[dict[str, Any]]:
@@ -293,9 +421,12 @@ def purchase_plan(item: dict[str, Any], available_monthly: float) -> dict[str, A
 
 def available_for_purchases() -> float:
     forecast = build_forecast()
-    target_pct = setting("investment_target_percent", 20) / 100
-    protected_investment = forecast["income"] * target_pct
-    return max(0, forecast["income"] - forecast["expense"] - protected_investment)
+    protected_percent = min(
+        100,
+        setting("investment_target_percent", 20) + setting("currency_target_percent", 10),
+    ) / 100
+    protected_reserves = forecast["income"] * protected_percent
+    return max(0, forecast["income"] - forecast["expense"] - protected_reserves)
 
 
 def goal_progress(item: dict[str, Any]) -> dict[str, Any]:

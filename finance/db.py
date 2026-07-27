@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
-    icon TEXT NOT NULL DEFAULT '•',
+    icon TEXT NOT NULL DEFAULT 'category',
     color TEXT NOT NULL DEFAULT '#7c5cff',
     parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     is_custom INTEGER NOT NULL DEFAULT 0,
@@ -49,9 +49,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL CHECK(kind IN ('life', 'investment')),
+    account_type TEXT NOT NULL DEFAULT 'checking',
     balance REAL NOT NULL DEFAULT 0,
     annual_rate REAL NOT NULL DEFAULT 0,
-    last_accrual_date TEXT NOT NULL DEFAULT (date('now'))
+    last_accrual_date TEXT NOT NULL DEFAULT (date('now')),
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -172,46 +174,60 @@ def init_db(seed_demo: bool = True) -> None:
             [("Саша", "#6c8cff"), ("Настя", "#ff6fae")],
         )
 
-    if db.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
-        categories = [
-            ("Зарплата", "income", "₽", "#33d69f", None, 0),
-            ("Подработка", "income", "↗", "#5b8cff", None, 0),
-            ("Подарки", "income", "✦", "#b879ff", None, 0),
-            ("Возвраты", "income", "↩", "#55c2ff", None, 0),
-            ("Продукты", "expense", "🛒", "#ff8d6c", None, 0),
-            ("Кафе и рестораны", "expense", "☕", "#ffad66", None, 0),
-            ("Транспорт", "expense", "🚕", "#6c8cff", None, 0),
-            ("Жильё", "expense", "⌂", "#b879ff", None, 0),
-            ("Коммунальные услуги", "expense", "⚡", "#55c2ff", None, 0),
-            ("Здоровье", "expense", "✚", "#ff6f91", None, 0),
-            ("Одежда", "expense", "◈", "#d09bff", None, 0),
-            ("Развлечения", "expense", "🎮", "#f9c74f", None, 0),
-            ("Образование", "expense", "⌁", "#43c6ac", None, 0),
-            ("Подписки", "expense", "◉", "#7f8cff", None, 0),
-            ("Подарки и помощь", "expense", "♡", "#ff78a8", None, 0),
-            ("Путешествия", "expense", "✈", "#4ecdc4", None, 0),
-            ("Дом и быт", "expense", "▣", "#f9844a", None, 0),
-            ("Красота и уход", "expense", "✧", "#f78fb3", None, 0),
-            ("Связь и интернет", "expense", "⌁", "#54a0ff", None, 0),
-            ("Непредвиденное", "expense", "!", "#ff5c5c", None, 0),
-        ]
-        db.executemany(
-            "INSERT INTO categories(name, type, icon, color, parent_id, is_custom) VALUES (?, ?, ?, ?, ?, ?)",
-            categories,
-        )
+    categories = [
+        ("Зарплата", "income", "wallet", "#33d69f", None, 0),
+        ("Подработка", "income", "briefcase", "#5b8cff", None, 0),
+        ("Подарки", "income", "gift", "#b879ff", None, 0),
+        ("Возвраты", "income", "refund", "#55c2ff", None, 0),
+        ("Продукты", "expense", "groceries", "#ff8d6c", None, 0),
+        ("Кафе и рестораны", "expense", "cafe", "#ffad66", None, 0),
+        ("Транспорт", "expense", "transport", "#6c8cff", None, 0),
+        ("Жильё", "expense", "housing", "#b879ff", None, 0),
+        ("Коммунальные услуги", "expense", "utilities", "#55c2ff", None, 0),
+        ("Здоровье", "expense", "health", "#ff6f91", None, 0),
+        ("Одежда", "expense", "clothing", "#d09bff", None, 0),
+        ("Развлечения", "expense", "entertainment", "#f9c74f", None, 0),
+        ("Образование", "expense", "education", "#43c6ac", None, 0),
+        ("Подписки", "expense", "subscriptions", "#7f8cff", None, 0),
+        ("Подарки и помощь", "expense", "aid", "#ff78a8", None, 0),
+        ("Путешествия", "expense", "travel", "#4ecdc4", None, 0),
+        ("Дом и быт", "expense", "home-care", "#f9844a", None, 0),
+        ("Красота и уход", "expense", "beauty", "#f78fb3", None, 0),
+        ("Связь и интернет", "expense", "internet", "#54a0ff", None, 0),
+        ("Непредвиденное", "expense", "alert", "#ff5c5c", None, 0),
+        ("Автомобиль", "expense", "car", "#5b8cff", None, 0),
+        ("Спорт и фитнес", "expense", "fitness", "#84cc16", None, 0),
+        ("Дети", "expense", "children", "#f9c74f", None, 0),
+        ("Питомцы", "expense", "pets", "#f59e0b", None, 0),
+        ("Техника", "expense", "devices", "#8b91a7", None, 0),
+        ("Ремонт", "expense", "repair", "#f97316", None, 0),
+        ("Налоги и комиссии", "expense", "taxes", "#ef4444", None, 0),
+        ("Страхование", "expense", "insurance", "#38bdf8", None, 0),
+        ("Хобби", "expense", "hobby", "#a78bfa", None, 0),
+        ("Благотворительность", "expense", "charity", "#fb7185", None, 0),
+    ]
+    db.executemany(
+        "INSERT OR IGNORE INTO categories(name, type, icon, color, parent_id, is_custom) VALUES (?, ?, ?, ?, ?, ?)",
+        categories,
+    )
+    db.executemany(
+        "UPDATE categories SET icon = ? WHERE name = ? AND type = ? AND is_custom = 0",
+        ((icon, name, category_type) for name, category_type, icon, *_ in categories),
+    )
 
     if db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:
         today = date.today().isoformat()
         db.executemany(
-            "INSERT INTO accounts(name, kind, balance, annual_rate, last_accrual_date) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO accounts(name, kind, account_type, balance, annual_rate, last_accrual_date) VALUES (?, ?, ?, ?, ?, ?)",
             [
-                ("Баланс на жизнь", "life", 0, 0, today),
-                ("Инвестиционный баланс", "investment", 0, 12.5, today),
+                ("Баланс на жизнь", "life", "checking", 0, 0, today),
+                ("Инвестиционный баланс", "investment", "investment", 0, 12.5, today),
             ],
         )
 
     defaults = {
         "investment_target_percent": "20",
+        "currency_target_percent": "10",
         "monthly_life_budget": "90000",
         "currency": "₽",
     }
@@ -229,6 +245,13 @@ def _apply_compatible_schema_changes(db: sqlite3.Connection) -> None:
     columns = {row["name"] for row in db.execute("PRAGMA table_info(audit_log)")}
     if "actor_user_id" not in columns:
         db.execute("ALTER TABLE audit_log ADD COLUMN actor_user_id INTEGER REFERENCES users(id)")
+
+    account_columns = {row["name"] for row in db.execute("PRAGMA table_info(accounts)")}
+    if "account_type" not in account_columns:
+        db.execute("ALTER TABLE accounts ADD COLUMN account_type TEXT NOT NULL DEFAULT 'checking'")
+        db.execute("UPDATE accounts SET account_type = 'investment' WHERE kind = 'investment'")
+    if "is_active" not in account_columns:
+        db.execute("ALTER TABLE accounts ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
 
 
 def _seed_demo(db: sqlite3.Connection) -> None:

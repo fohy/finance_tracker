@@ -25,7 +25,7 @@ def purchases():
 
 @pages_bp.get("/goals")
 def goals():
-    return render_template("goals.html", page="goals", title="Цели")
+    return render_template("goals.html", page="goals", title="Накопительные цели")
 
 
 @pages_bp.get("/people")

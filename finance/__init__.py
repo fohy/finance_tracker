@@ -1,6 +1,7 @@
 from collections.abc import Mapping
+from pathlib import Path
 
-from flask import Flask
+from flask import Flask, url_for
 
 from .auth import init_auth
 from .cli import init_cli
@@ -30,6 +31,16 @@ def create_app(test_config: Mapping[str, object] | None = None) -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(pages_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
+
+    @app.template_global()
+    def asset_url(filename: str) -> str:
+        """Return a static URL versioned by the asset modification time."""
+        static_folder = Path(app.static_folder or "")
+        try:
+            version = static_folder.joinpath(filename).stat().st_mtime_ns
+        except OSError:
+            version = "missing"
+        return url_for("static", filename=filename, v=version)
 
     with app.app_context():
         init_db(seed_demo=app.config["SEED_DEMO"])
