@@ -7,3 +7,5 @@ instance/*.db
 instance/*.db-shm
 instance/*.db-wal
 backups/
+/build/
+*.egg-info/
