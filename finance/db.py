@@ -53,9 +53,19 @@ CREATE TABLE IF NOT EXISTS accounts (
     balance REAL NOT NULL DEFAULT 0,
     annual_rate REAL NOT NULL DEFAULT 0,
     last_accrual_date TEXT NOT NULL DEFAULT (date('now')),
+    interest_enabled INTEGER NOT NULL DEFAULT 0 CHECK(interest_enabled IN (0, 1)),
+    interest_last_posted_month TEXT,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
     currency_code TEXT NOT NULL DEFAULT 'RUB',
     exchange_rate REAL NOT NULL DEFAULT 1 CHECK(exchange_rate > 0)
+);
+
+CREATE TABLE IF NOT EXISTS account_rate_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    effective_date TEXT NOT NULL,
+    annual_rate REAL NOT NULL CHECK(annual_rate >= 0),
+    UNIQUE(account_id, effective_date)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -169,6 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_login_attempts_login_time ON login_attempts(login
 CREATE INDEX IF NOT EXISTS idx_recurring_next_date ON recurring_transactions(next_date, is_active);
 CREATE INDEX IF NOT EXISTS idx_category_rules_priority ON category_rules(is_active, priority, id);
 CREATE INDEX IF NOT EXISTS idx_import_batches_created ON import_batches(created_at);
+CREATE INDEX IF NOT EXISTS idx_account_rate_history_date ON account_rate_history(account_id, effective_date);
 """
 
 
@@ -292,6 +303,14 @@ def _apply_compatible_schema_changes(db: sqlite3.Connection) -> None:
         db.execute("ALTER TABLE accounts ADD COLUMN currency_code TEXT NOT NULL DEFAULT 'RUB'")
     if "exchange_rate" not in account_columns:
         db.execute("ALTER TABLE accounts ADD COLUMN exchange_rate REAL NOT NULL DEFAULT 1")
+    if "interest_enabled" not in account_columns:
+        db.execute("ALTER TABLE accounts ADD COLUMN interest_enabled INTEGER NOT NULL DEFAULT 0")
+    if "interest_last_posted_month" not in account_columns:
+        db.execute("ALTER TABLE accounts ADD COLUMN interest_last_posted_month TEXT")
+    db.execute(
+        """INSERT OR IGNORE INTO account_rate_history(account_id, effective_date, annual_rate)
+           SELECT id, date('now', 'start of month'), annual_rate FROM accounts WHERE annual_rate > 0"""
+    )
 
     transaction_columns = {row["name"] for row in db.execute("PRAGMA table_info(transactions)")}
     if "target_amount" not in transaction_columns:

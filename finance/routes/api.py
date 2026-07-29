@@ -332,16 +332,30 @@ def create_account():
     if account_type not in ACCOUNT_TYPES:
         raise ValueError("Неизвестный тип счёта")
     rate = account_rate(data.get("annual_rate"), account_type)
+    interest_enabled = (
+        str(data.get("interest_enabled", "false")).lower() in {"1", "true", "yes", "on"}
+        and account_type in {"savings", "deposit", "investment"}
+    )
+    if interest_enabled and rate <= 0:
+        raise ValueError("Для автоначисления укажите ставку больше 0%")
     currency_code, exchange_rate = account_currency(data, account_type)
     db = get_db()
     try:
+        today = date.today()
+        previous_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         cursor = db.execute(
             """INSERT INTO accounts(name, kind, account_type, balance, annual_rate, last_accrual_date,
-                       is_active, currency_code, exchange_rate)
-               VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?)""",
-            (name, account_kind(account_type), account_type, rate, date.today().isoformat(),
+                       interest_enabled, interest_last_posted_month, is_active, currency_code, exchange_rate)
+               VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1, ?, ?)""",
+            (name, account_kind(account_type), account_type, rate, today.isoformat(),
+             int(interest_enabled), previous_month if interest_enabled else None,
              currency_code, exchange_rate),
         )
+        if rate > 0:
+            db.execute(
+                "INSERT INTO account_rate_history(account_id, effective_date, annual_rate) VALUES (?, ?, ?)",
+                (cursor.lastrowid, today.isoformat(), rate),
+            )
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -354,7 +368,10 @@ def create_account():
 @api_bp.patch("/accounts/<int:account_id>")
 def update_account(account_id: int):
     data = payload()
-    allowed = {"name", "account_type", "annual_rate", "is_active", "currency_code", "exchange_rate"}
+    allowed = {
+        "name", "account_type", "annual_rate", "interest_enabled", "is_active",
+        "currency_code", "exchange_rate",
+    }
     updates = {k: data[k] for k in allowed if k in data}
     if not updates:
         raise ValueError("Нет полей для изменения")
@@ -379,6 +396,20 @@ def update_account(account_id: int):
         updates["kind"] = account_kind(account_type)
     if "annual_rate" in updates or "account_type" in updates:
         updates["annual_rate"] = account_rate(updates.get("annual_rate", account["annual_rate"]), account_type)
+    eligible_for_interest = account_type in {"savings", "deposit", "investment"}
+    if "interest_enabled" in updates:
+        updates["interest_enabled"] = int(
+            str(updates["interest_enabled"]).lower() in {"1", "true", "yes", "on"}
+        )
+    if not eligible_for_interest:
+        updates["interest_enabled"] = 0
+    resulting_enabled = bool(updates.get("interest_enabled", account["interest_enabled"]))
+    resulting_rate = float(updates.get("annual_rate", account["annual_rate"]))
+    if resulting_enabled and resulting_rate <= 0:
+        raise ValueError("Для автоначисления укажите ставку больше 0%")
+    if resulting_enabled and not account["interest_enabled"]:
+        previous_month = (date.today().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        updates["interest_last_posted_month"] = previous_month
     if {"currency_code", "exchange_rate", "account_type"} & updates.keys():
         updates["currency_code"], updates["exchange_rate"] = account_currency(updates, account_type, account)
     if "is_active" in updates:
@@ -388,6 +419,13 @@ def update_account(account_id: int):
     parts = ", ".join(f"{key} = ?" for key in updates)
     try:
         db.execute(f"UPDATE accounts SET {parts} WHERE id = ?", [*updates.values(), account_id])
+        if "annual_rate" in updates and resulting_rate != float(account["annual_rate"]):
+            db.execute(
+                """INSERT INTO account_rate_history(account_id, effective_date, annual_rate)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(account_id, effective_date) DO UPDATE SET annual_rate = excluded.annual_rate""",
+                (account_id, date.today().isoformat(), resulting_rate),
+            )
         db.commit()
     except Exception as exc:
         db.rollback()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from calendar import monthrange
+from calendar import isleap, monthrange
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -48,31 +48,115 @@ def shift_period(period: str, anchor: str | None, direction: int) -> str:
     return shifted.isoformat()
 
 
-def accrue_interest() -> None:
+def _month_start(value: date) -> date:
+    return value.replace(day=1)
+
+
+def _next_month(value: date) -> date:
+    return (value.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+
+def _ledger_balance_before(account_id: int, before: date) -> float:
+    row = get_db().execute(
+        """SELECT COALESCE(SUM(
+               CASE
+                 WHEN account_id = ? AND tx_type IN ('income', 'interest') THEN amount
+                 WHEN account_id = ? AND tx_type IN ('expense', 'transfer') THEN -amount
+                 WHEN target_account_id = ? AND tx_type = 'transfer' THEN COALESCE(target_amount, amount)
+                 ELSE 0
+               END
+           ), 0) balance
+           FROM transactions WHERE tx_date < ?""",
+        (account_id, account_id, account_id, before.isoformat()),
+    ).fetchone()
+    return float(row["balance"])
+
+
+def calculate_monthly_interest(account_id: int, start: date, annual_rate: float) -> float:
+    """Calculate simple daily interest on each day's closing ledger balance."""
     db = get_db()
-    today = date.today()
+    end = start.replace(day=monthrange(start.year, start.month)[1])
+    daily_rows = db.execute(
+        """SELECT tx_date, SUM(
+               CASE
+                 WHEN account_id = ? AND tx_type IN ('income', 'interest') THEN amount
+                 WHEN account_id = ? AND tx_type IN ('expense', 'transfer') THEN -amount
+                 WHEN target_account_id = ? AND tx_type = 'transfer' THEN COALESCE(target_amount, amount)
+                 ELSE 0
+               END
+           ) delta
+           FROM transactions
+           WHERE tx_date BETWEEN ? AND ? AND (account_id = ? OR target_account_id = ?)
+           GROUP BY tx_date""",
+        (account_id, account_id, account_id, start.isoformat(), end.isoformat(), account_id, account_id),
+    ).fetchall()
+    deltas = {row["tx_date"]: float(row["delta"]) for row in daily_rows}
+    rate_rows = db.execute(
+        """SELECT effective_date, annual_rate FROM account_rate_history
+           WHERE account_id = ? AND effective_date <= ? ORDER BY effective_date""",
+        (account_id, end.isoformat()),
+    ).fetchall()
+    rates = [(parse_date(row["effective_date"]), float(row["annual_rate"])) for row in rate_rows]
+    balance = _ledger_balance_before(account_id, start)
+    interest = 0.0
+    current_rate = annual_rate if not rates else 0.0
+    rate_index = 0
+    day = start
+    while day <= end:
+        balance += deltas.get(day.isoformat(), 0.0)
+        while rate_index < len(rates) and rates[rate_index][0] <= day:
+            current_rate = rates[rate_index][1]
+            rate_index += 1
+        days_in_year = 366 if isleap(day.year) else 365
+        interest += max(0.0, balance) * current_rate / 100 / days_in_year
+        day += timedelta(days=1)
+    return round(interest, 2)
+
+
+def accrue_interest(as_of: date | None = None) -> None:
+    """Post one interest transaction for each completed, not-yet-posted month."""
+    db = get_db()
+    today = as_of or date.today()
+    current_month = _month_start(today)
     accounts = db.execute(
-        "SELECT * FROM accounts WHERE is_active = 1 AND annual_rate > 0"
+        """SELECT * FROM accounts
+           WHERE is_active = 1 AND interest_enabled = 1 AND annual_rate > 0
+             AND account_type IN ('savings', 'deposit', 'investment')"""
     ).fetchall()
     changed = False
     for account in accounts:
-        last = parse_date(account["last_accrual_date"], today)
-        days = (today - last).days
-        if days <= 0:
-            continue
-        daily_rate = float(account["annual_rate"]) / 100 / 365
-        interest = float(account["balance"]) * ((1 + daily_rate) ** days - 1)
-        if interest > 0.005:
+        last_key = account["interest_last_posted_month"]
+        if not last_key:
+            previous = current_month - timedelta(days=1)
             db.execute(
-                "UPDATE accounts SET balance = balance + ?, last_accrual_date = ? WHERE id = ?",
-                (interest, today.isoformat(), account["id"]),
-            )
-            db.execute(
-                """INSERT INTO transactions(tx_type, amount, tx_date, account_id, note)
-                   VALUES ('interest', ?, ?, ?, ?)""",
-                (interest, today.isoformat(), account["id"], f"Автоначисление за {days} дн."),
+                "UPDATE accounts SET interest_last_posted_month = ? WHERE id = ?",
+                (previous.strftime("%Y-%m"), account["id"]),
             )
             changed = True
+            continue
+        period = _next_month(parse_date(f"{last_key}-01"))
+        processed = 0
+        while period < current_month and processed < 24:
+            period_end = period.replace(day=monthrange(period.year, period.month)[1])
+            interest = calculate_monthly_interest(account["id"], period, float(account["annual_rate"]))
+            if interest > 0.005:
+                db.execute(
+                    "UPDATE accounts SET balance = balance + ? WHERE id = ?",
+                    (interest, account["id"]),
+                )
+                db.execute(
+                    """INSERT INTO transactions(tx_type, amount, tx_date, account_id, note)
+                       VALUES ('interest', ?, ?, ?, ?)""",
+                    (interest, period_end.isoformat(), account["id"], f"Проценты за {period:%m.%Y}"),
+                )
+            db.execute(
+                """UPDATE accounts
+                   SET last_accrual_date = ?, interest_last_posted_month = ? WHERE id = ?""",
+                (period_end.isoformat(), period.strftime("%Y-%m"), account["id"]),
+            )
+            changed = True
+            period = _next_month(period)
+            processed += 1
     if changed:
         db.commit()
 

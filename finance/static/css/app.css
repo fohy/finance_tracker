@@ -1115,6 +1115,13 @@ td { height: 54px; }
     *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
+.toggle-field { display: grid !important; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 11px !important; padding: 13px; background: var(--control-bg); border: 1px solid var(--border); border-radius: var(--radius); }
+.toggle-field > input[type="checkbox"] { width: 19px; min-height: 19px; margin: 1px 0 0; accent-color: var(--accent); }
+.toggle-field > input[type="hidden"] { display: none; }
+.toggle-field span, .toggle-field strong, .toggle-field small { display: block; }
+.toggle-field strong { color: var(--ink-strong); font-size: 12px; }
+.toggle-field small { margin-top: 4px; color: var(--ink-muted); font-size: 9px; line-height: 1.45; }
+
 /* Final semantic theme and responsive stabilization */
 :root,
 :root[data-theme="dark"] {

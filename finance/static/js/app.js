@@ -748,8 +748,11 @@
         ]);
         const investments = accounts.filter(a => ['savings', 'deposit', 'investment'].includes(a.account_type) && a.is_active);
         const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', investment: 'Инвестиционный' };
-        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${money(account.balance)}</strong><div class="account-meta"><span>${Number(account.annual_rate).toFixed(1)}% годовых</span><span>начислено по ${formatDate(account.last_accrual_date)}</span></div></article>`).join('') : '<div class="card empty-state">Добавьте накопительный или инвестиционный счёт в настройках</div>';
+        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${money(account.balance)}</strong><div class="account-meta"><span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span></div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить ставку</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный или инвестиционный счёт в настройках</div>';
         $('#investmentTransactions').innerHTML = tx.items.filter(item => ['transfer', 'interest'].includes(item.tx_type)).map(transactionRow).join('') || '<div class="empty-state">Пополнений пока нет</div>';
+        $$('[data-configure-interest]').forEach(button => button.addEventListener('click', () => {
+            openAccountForm(accounts.find(account => account.id === Number(button.dataset.configureInterest)));
+        }));
         setupInvestmentCalculator(investments.find(a => a.account_type === 'investment') || investments[0]);
     }
 
@@ -896,6 +899,7 @@
             <label>Название<input name="name" value="${escapeHtml(account?.name || '')}" required placeholder="Например: Подушка безопасности"></label>
             <label>Тип счёта<select name="account_type">${accountTypeOptions(account?.account_type)}</select></label>
             <label>Годовая ставка, %<input name="annual_rate" type="number" min="0" max="100" step="0.01" value="${Number(account?.annual_rate || 0)}"><small>Используется для накопительных счетов, вкладов и инвестиций.</small></label>
+            <label class="toggle-field"><input type="hidden" name="interest_enabled" value="false"><input name="interest_enabled" type="checkbox" value="true" ${account?.interest_enabled ? 'checked' : ''}><span><strong>Автоначисление процентов</strong><small>Считается по ежедневному остатку, проводится одной операцией после окончания месяца.</small></span></label>
             <label>Код валюты<input name="currency_code" maxlength="3" value="${escapeHtml(account?.currency_code || state.bootstrap.settings.base_currency_code || 'RUB')}" placeholder="USD"><small>Для валютного счёта.</small></label>
             <label>Курс к основной валюте<input name="exchange_rate" type="number" min="0.000001" step="0.000001" value="${Number(account?.exchange_rate || 1)}"><small>Сколько основной валюты стоит одна единица валюты счёта.</small></label>`, async data => {
             try {
@@ -903,7 +907,7 @@
                 toast(editing ? 'Счёт обновлён' : 'Счёт добавлен');
                 closeModals();
                 await refreshBootstrap();
-                await loadSettings();
+                await loadCurrentPage();
             } catch (error) { toast(error.message, 'error'); }
         });
     }
