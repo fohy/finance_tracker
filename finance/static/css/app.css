@@ -957,8 +957,7 @@ h1, h2, h3 { font-family: var(--font-display); }
 :focus-visible { outline-color: color-mix(in srgb, var(--primary) 82%, white); }
 
 .btn svg, .icon-btn svg, .logout-button svg, .metric-icon svg, .shield svg,
-.tx-icon svg, .category-icon svg, .category-label svg, .account-setting-icon svg,
-.allocation-icon svg, .allocation-advice svg {
+.tx-icon svg, .category-icon svg, .category-label svg, .account-setting-icon svg {
     width: 18px;
     height: 18px;
     flex: 0 0 auto;
@@ -1390,38 +1389,6 @@ tbody tr:hover { background: var(--control-bg); }
 .account-setting-actions .btn { min-height: 36px; padding: 8px 10px; }
 .account-setting-actions .btn svg { width: 15px; height: 15px; }
 
-/* Automatic income allocation */
-.allocation-card { padding: clamp(22px, 2.3vw, 30px); }
-.allocation-card .card-header { align-items: flex-end; }
-.allocation-card .card-header p { max-width: 660px; margin: 7px 0 0; }
-.allocation-income { flex: 0 0 auto; text-align: right; }
-.allocation-income span { display: block; color: var(--ink-muted); font-size: 9px; }
-.allocation-income strong { display: block; margin-top: 4px; color: var(--ink-strong); font-size: 22px; }
-.allocation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.allocation-grid > .loading-state { grid-column: 1 / -1; }
-.allocation-bucket { min-width: 0; padding: 17px; background: var(--control-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); }
-.allocation-bucket-head { display: flex; align-items: center; gap: 9px; color: var(--ink-muted); font-size: 10px; font-weight: 650; }
-.allocation-icon { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 9px; }
-.allocation-icon svg { width: 16px; height: 16px; }
-.allocation-bucket > strong { display: block; margin: 16px 0 12px; color: var(--ink-strong); font-size: clamp(22px, 2.2vw, 30px); letter-spacing: -.04em; }
-.allocation-bucket .progress-track { height: 6px; }
-.allocation-bucket .progress-track i { background: var(--accent); }
-.allocation-bucket.currency .progress-track i { background: var(--lavender); }
-.allocation-bucket.is-over .progress-track i { background: var(--red); }
-.allocation-bucket-meta { display: grid; gap: 4px; margin-top: 11px; color: var(--ink-muted); font-size: 9px; }
-.allocation-bucket-meta b { color: var(--ink); font-weight: 600; }
-.allocation-bucket.is-over .allocation-bucket-meta b { color: var(--red); }
-.allocation-advice { display: flex; align-items: center; gap: 10px; margin-top: 13px; padding: 12px 14px; color: var(--ink); background: color-mix(in srgb, var(--accent) 6%, var(--control-bg)); border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border)); border-radius: var(--radius); }
-.allocation-advice svg { width: 18px; height: 18px; flex: 0 0 18px; color: var(--accent); }
-.allocation-advice p { flex: 1; margin: 0; font-size: 11px; line-height: 1.5; }
-.allocation-prompt { padding: 22px 24px 8px; }
-.allocation-prompt > p { margin: 0 0 16px; color: var(--ink-muted); line-height: 1.6; }
-.allocation-prompt > p strong { color: var(--ink-strong); }
-.allocation-prompt-list { display: grid; gap: 8px; }
-.allocation-prompt-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 14px; padding: 13px; background: var(--control-bg); border: 1px solid var(--border); border-radius: var(--radius); }
-.allocation-prompt-list span { color: var(--ink); }
-.allocation-prompt-list strong { color: var(--ink-strong); font-size: 16px; }
-.allocation-prompt-list small { grid-column: 1 / -1; color: var(--ink-muted); }
 
 .topbar > *, .topbar-actions, .card-header > *, .page-intro > *,
 .form-grid > *, .settings-layout > *, .dashboard-grid > *, .hero-grid > *,
@@ -1456,10 +1423,6 @@ tbody tr:hover { background: var(--control-bg); }
     .account-setting-meta, .account-setting-actions { grid-column: 1 / -1; }
     .account-setting-actions { padding-top: 9px; border-top: 1px solid var(--border); flex-wrap: wrap; }
     .balance-split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .allocation-card .card-header { align-items: flex-start; }
-    .allocation-income { text-align: left; }
-    .allocation-grid { grid-template-columns: 1fr; }
-    .allocation-advice { align-items: flex-start; flex-wrap: wrap; }
 }
 
 @media (max-width: 480px) {
@@ -1815,11 +1778,11 @@ select option:disabled { color: var(--ink-subtle); }
 .btn-danger { color: var(--red); background: color-mix(in srgb, var(--red) 7%, transparent); border-color: color-mix(in srgb, var(--red) 17%, var(--border)); }
 .btn-danger:hover { color: var(--red); background: color-mix(in srgb, var(--red) 13%, transparent); border-color: color-mix(in srgb, var(--red) 28%, var(--border)); }
 
-.list-row, .account-setting-row, .allocation-bucket, .result-strip > div {
+.list-row, .account-setting-row, .result-strip > div {
     animation: itemReveal .34s cubic-bezier(.2, .75, .25, 1) backwards;
 }
-.list-row:nth-child(2), .account-setting-row:nth-child(2), .allocation-bucket:nth-child(2), .result-strip > div:nth-child(2) { animation-delay: 35ms; }
-.list-row:nth-child(3), .account-setting-row:nth-child(3), .allocation-bucket:nth-child(3), .result-strip > div:nth-child(3) { animation-delay: 70ms; }
+.list-row:nth-child(2), .account-setting-row:nth-child(2), .result-strip > div:nth-child(2) { animation-delay: 35ms; }
+.list-row:nth-child(3), .account-setting-row:nth-child(3), .result-strip > div:nth-child(3) { animation-delay: 70ms; }
 .list-row:nth-child(n+4), .account-setting-row:nth-child(n+4), .result-strip > div:nth-child(n+4) { animation-delay: 95ms; }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1848,7 +1811,7 @@ select option:disabled { color: var(--ink-subtle); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .list-row, .account-setting-row, .allocation-bucket, .result-strip > div,
+    .list-row, .account-setting-row, .result-strip > div,
     .progress-track i { animation: none !important; }
     .btn, .icon-btn, .delete-btn, .theme-toggle, .feature-card, .entity-card,
     .settings-card, .account-card, .person-card { transform: none !important; }

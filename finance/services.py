@@ -235,7 +235,6 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
 
     score = correctness_score(current, period, start, end)
     forecast = build_forecast(person_id)
-    allocation = allocation_plan(current, start, end, accounts)
 
     return {
         "period": period,
@@ -253,7 +252,6 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
         "total_capital": round(life_balance + savings_balance + currency_balance + investment_balance, 2),
         "score": score,
         "forecast": forecast,
-        "allocation_plan": allocation,
     }
 
 
@@ -305,83 +303,6 @@ def correctness_score(metrics: dict[str, float], period: str, start: date, end: 
         "investment_rate": round(investment_rate, 1),
         "budget": round(budget, 2),
         "tips": tips,
-    }
-
-
-def allocation_plan(
-    metrics: dict[str, float], start: date, end: date, accounts: list[dict[str, Any]]
-) -> dict[str, Any]:
-    income = max(0.0, metrics["income"])
-    target_percent = max(0.0, min(100.0, setting("investment_target_percent", 20)))
-    currency_percent = max(0.0, min(100.0 - target_percent, setting("currency_target_percent", 10)))
-    period_days = (end - start).days + 1
-    monthly_limit = setting("monthly_life_budget", 90000)
-    spending_limit = max(0.0, monthly_limit if period_days >= 28 else monthly_limit * period_days / 30.44)
-
-    base_savings = income * target_percent / 100
-    planned_currency = income * currency_percent / 100
-    distributable = max(0.0, income - base_savings - planned_currency)
-    planned_spending = min(spending_limit, distributable)
-    planned_savings = base_savings + max(0.0, distributable - planned_spending)
-
-    def bucket(key: str, label: str, planned: float, actual: float, destination: str | None = None) -> dict[str, Any]:
-        remaining = max(0.0, planned - actual)
-        return {
-            "key": key,
-            "label": label,
-            "planned": round(planned, 2),
-            "actual": round(actual, 2),
-            "remaining": round(remaining, 2),
-            "progress": round(min(100.0, actual / planned * 100), 1) if planned else 0,
-            "over": round(max(0.0, actual - planned), 2),
-            "destination": destination,
-        }
-
-    active_accounts = [account for account in accounts if account["is_active"]]
-    source = next(
-        (account for account in active_accounts if account["account_type"] in {"checking", "cash"}), None
-    )
-    savings = next(
-        (account for account in active_accounts if account["account_type"] in {"savings", "deposit"}),
-        None,
-    ) or next(
-        (account for account in active_accounts if account["account_type"] == "investment"),
-        None,
-    )
-    currency = next(
-        (account for account in active_accounts if account["account_type"] == "currency"), None
-    )
-    buckets = [
-        bucket("spending", "Можно потратить", planned_spending, metrics["expense"]),
-        bucket(
-            "savings", "В накопления / инвестиции", planned_savings, metrics["saved"],
-            savings["name"] if savings else None,
-        ),
-        bucket(
-            "currency", "В валютный резерв", planned_currency, metrics["currency_reserved"],
-            currency["name"] if currency else None,
-        ),
-    ]
-    if income <= 0:
-        advice = "Добавьте доходы за выбранный период — после этого появится план распределения."
-    elif buckets[0]["over"] > 0:
-        advice = "Лимит расходов превышен. Сначала сократите необязательные траты, затем пополняйте цели."
-    elif buckets[1]["remaining"] > 0:
-        advice = "Переведите рассчитанную сумму на накопительный или инвестиционный счёт."
-    elif buckets[2]["remaining"] > 0:
-        advice = "Накопительный план выполнен — пополните валютный резерв."
-    else:
-        advice = "План распределения на выбранный период выполнен."
-    return {
-        "income": round(income, 2),
-        "target_percent": round(target_percent, 1),
-        "currency_percent": round(currency_percent, 1),
-        "source_account": source["name"] if source else None,
-        "source_account_id": source["id"] if source else None,
-        "savings_account_id": savings["id"] if savings else None,
-        "currency_account_id": currency["id"] if currency else None,
-        "buckets": buckets,
-        "advice": advice,
     }
 
 
@@ -505,36 +426,6 @@ def trend_series(period: str, anchor: str | None, person_id: int | None = None) 
         params,
     ).fetchall()
     return [dict(r) for r in rows]
-
-
-def purchase_plan(item: dict[str, Any], available_monthly: float) -> dict[str, Any]:
-    remaining = max(0, float(item["cost"]) - float(item["saved_amount"]))
-    target = parse_date(item.get("target_date"), date.today() + timedelta(days=90))
-    days = max(1, (target - date.today()).days)
-    daily = remaining / days
-    weekly = daily * 7
-    monthly = daily * 30.44
-    affordability = "safe" if monthly <= max(0, available_monthly * 0.5) else "tight" if monthly <= max(0, available_monthly) else "risk"
-    return {
-        **item,
-        "remaining": round(remaining, 2),
-        "days_left": days,
-        "daily_save": round(daily, 2),
-        "weekly_save": round(weekly, 2),
-        "monthly_save": round(monthly, 2),
-        "affordability": affordability,
-        "progress": round(min(100, float(item["saved_amount"]) / max(float(item["cost"]), 1) * 100), 1),
-    }
-
-
-def available_for_purchases() -> float:
-    forecast = build_forecast()
-    protected_percent = min(
-        100,
-        setting("investment_target_percent", 20) + setting("currency_target_percent", 10),
-    ) / 100
-    protected_reserves = forecast["income"] * protected_percent
-    return max(0, forecast["income"] - forecast["expense"] - protected_reserves)
 
 
 def goal_progress(item: dict[str, Any]) -> dict[str, Any]:

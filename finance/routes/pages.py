@@ -18,11 +18,6 @@ def investments():
     return render_template("investments.html", page="investments", title="Инвестиции")
 
 
-@pages_bp.get("/purchases")
-def purchases():
-    return render_template("purchases.html", page="purchases", title="План покупок")
-
-
 @pages_bp.get("/goals")
 def goals():
     return render_template("goals.html", page="goals", title="Накопительные цели")
@@ -41,11 +36,6 @@ def settings():
 @pages_bp.get("/recurring")
 def recurring():
     return render_template("recurring.html", page="recurring", title="Регулярные операции")
-
-
-@pages_bp.get("/automation")
-def automation():
-    return render_template("automation.html", page="automation", title="Автоматизация")
 
 
 @pages_bp.get("/insights")

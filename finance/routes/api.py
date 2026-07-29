@@ -13,14 +13,12 @@ from ..db import get_db
 from ..errors import NotFoundError
 from ..services import (
     accrue_interest,
-    available_for_purchases,
     category_breakdown,
     category_budget_status,
     get_summary,
     goal_progress,
     parse_date,
     period_bounds,
-    purchase_plan,
     shift_period,
     spending_statistics,
     trend_series,
@@ -521,61 +519,6 @@ def update_goal(item_id: int):
 def delete_goal(item_id: int):
     db = get_db()
     db.execute("DELETE FROM goals WHERE id = ?", (item_id,))
-    db.commit()
-    return ok()
-
-
-@api_bp.get("/purchases")
-def list_purchases():
-    available = available_for_purchases()
-    rows = get_db().execute(
-        """SELECT b.*, p.name person_name, p.avatar_color
-           FROM purchases b LEFT JOIN people p ON p.id=b.person_id
-           ORDER BY CASE b.status WHEN 'planned' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
-                    CASE b.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, b.target_date"""
-    ).fetchall()
-    return ok({
-        "available_monthly": round(available, 2),
-        "items": [purchase_plan(dict(r), available) for r in rows],
-    })
-
-
-@api_bp.post("/purchases")
-def create_purchase():
-    data = payload()
-    title = str(data.get("title") or "").strip()
-    if not title:
-        raise ValueError("Введите название покупки")
-    cost = as_float(data.get("cost"), "Стоимость")
-    saved = max(0, float(data.get("saved_amount") or 0))
-    db = get_db()
-    cursor = db.execute(
-        """INSERT INTO purchases(title, cost, saved_amount, target_date, person_id, priority, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (title, cost, saved, data.get("target_date") or None, as_int_or_none(data.get("person_id")), data.get("priority") or "medium", data.get("note") or ""),
-    )
-    db.commit()
-    return ok({"id": cursor.lastrowid}, 201)
-
-
-@api_bp.patch("/purchases/<int:item_id>")
-def update_purchase(item_id: int):
-    data = payload()
-    allowed = {"title", "cost", "saved_amount", "target_date", "person_id", "priority", "status", "note"}
-    updates = {k: data[k] for k in allowed if k in data}
-    if not updates:
-        raise ValueError("Нет данных для обновления")
-    parts = ", ".join(f"{key} = ?" for key in updates)
-    db = get_db()
-    db.execute(f"UPDATE purchases SET {parts} WHERE id = ?", [*updates.values(), item_id])
-    db.commit()
-    return ok()
-
-
-@api_bp.delete("/purchases/<int:item_id>")
-def delete_purchase(item_id: int):
-    db = get_db()
-    db.execute("DELETE FROM purchases WHERE id = ?", (item_id,))
     db.commit()
     return ok()
 

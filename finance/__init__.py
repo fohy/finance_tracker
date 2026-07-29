@@ -29,14 +29,12 @@ def create_app(test_config: Mapping[str, object] | None = None) -> Flask:
 
     from .routes.api import api_bp
     from .routes.auth import auth_bp
-    from .routes.automation_api import automation_api_bp
     from .routes.insights_api import insights_api_bp
     from .routes.pages import pages_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(pages_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
-    app.register_blueprint(automation_api_bp, url_prefix="/api")
     app.register_blueprint(insights_api_bp, url_prefix="/api")
 
     @app.template_global()

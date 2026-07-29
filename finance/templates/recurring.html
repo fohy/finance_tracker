@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="card table-card">
-    <div class="card-header table-tools"><div><div class="card-kicker">Автоматизация</div><h3>Регулярные операции</h3></div><button class="btn btn-primary" id="addRecurringBtn"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Правило</button></div>
+    <div class="card-header table-tools"><div><div class="card-kicker">Расписание</div><h3>Регулярные операции</h3></div><button class="btn btn-primary" id="addRecurringBtn"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Правило</button></div>
     <p class="muted">Создайте зарплату, аренду или подписку. В день оплаты нажмите «Провести» — правило перенесёт дату на следующий период.</p>
     <div id="recurringList" class="entity-grid"><div class="loading-state" role="status">Загружаем правила…</div></div>
 </div>

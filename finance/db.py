@@ -378,12 +378,3 @@ def _seed_demo(db: sqlite3.Connection) -> None:
                 ("Путешествие", 180000, 65000, (today + timedelta(days=120)).isoformat(), people["Настя"], "medium", "Отпуск вдвоём"),
             ],
         )
-
-    if db.execute("SELECT COUNT(*) FROM purchases").fetchone()[0] == 0:
-        db.executemany(
-            "INSERT INTO purchases(title, cost, saved_amount, target_date, person_id, priority, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [
-                ("Новый ноутбук", 190000, 45000, (today + timedelta(days=150)).isoformat(), people["Саша"], "high", "Для работы"),
-                ("Кофемашина", 42000, 12000, (today + timedelta(days=75)).isoformat(), people["Настя"], "medium", "Домой"),
-            ],
-        )

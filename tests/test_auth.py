@@ -51,3 +51,12 @@ def test_production_requires_secret_and_enables_secure_cookie(tmp_path):
         "TESTING": True,
     })
     assert app.config["SESSION_COOKIE_SECURE"] is True
+
+
+def test_removed_automation_and_purchase_surfaces_are_unavailable(client):
+    for path in (
+        "/automation", "/purchases", "/api/category-rules", "/api/salary-plan",
+        "/api/upcoming-payments", "/api/purchases",
+    ):
+        assert client.get(path).status_code == 404
+    assert "allocation_plan" not in client.get("/api/summary?period=month").get_json()["data"]

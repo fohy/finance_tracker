@@ -44,21 +44,9 @@ def _merchant_key(note: str) -> str:
 
 
 def category_for_note(note: str, tx_type: str) -> int | None:
-    """Prefer explicit rules, then a conservative category learned from corrected history."""
+    """Infer a category conservatively from consistent corrected history."""
     if not note.strip() or tx_type not in {"income", "expense"}:
         return None
-    rows = get_db().execute(
-        """SELECT r.category_id, r.pattern FROM category_rules r
-           JOIN categories c ON c.id = r.category_id
-           WHERE r.is_active = 1 AND c.type = ?
-           ORDER BY r.priority ASC, length(r.pattern) DESC, r.id ASC""",
-        (tx_type,),
-    ).fetchall()
-    folded_note = note.casefold()
-    match = next((row for row in rows if str(row["pattern"]).casefold() in folded_note), None)
-    if match:
-        return int(match["category_id"])
-
     key = _merchant_key(note)
     if len(key) < 3:
         return None
