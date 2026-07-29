@@ -248,11 +248,11 @@
         const number = Number(value || 0);
         const prefix = sign && number > 0 ? '+' : '';
         const currency = state.bootstrap?.settings?.currency || '₽';
-        return `${prefix}${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(number)} ${currency}`;
+        return `${prefix}${new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number)} ${currency}`;
     }
 
     function nativeMoney(value, code) {
-        return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(Number(value || 0))} ${escapeHtml(code || '')}`;
+        return `${new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0))} ${escapeHtml(code || '')}`;
     }
 
     function applyRuntimeSettings() {
@@ -406,6 +406,9 @@
         form.addEventListener('submit', async event => {
             event.preventDefault();
             const data = Object.fromEntries(new FormData(form).entries());
+            const incomeAccount = state.bootstrap.accounts.find(account => account.id === Number(data.account_id));
+            const shouldOfferAllocation = data.tx_type === 'income'
+                && ['checking', 'cash'].includes(incomeAccount?.account_type);
             try {
                 await api('/api/transactions', { method: 'POST', body: data });
                 toast('Операция сохранена');
@@ -414,7 +417,7 @@
                 form.tx_date.value = state.bootstrap.today;
                 await refreshBootstrap();
                 await loadCurrentPage();
-                if (data.tx_type === 'income') {
+                if (shouldOfferAllocation) {
                     const query = new URLSearchParams({ period: 'month', anchor: data.tx_date || state.bootstrap.today });
                     if (data.person_id) query.set('person_id', data.person_id);
                     const summary = await api(`/api/summary?${query}`);
@@ -713,7 +716,7 @@
         const container = $('#entityModalContent');
         const actionLabels = {
             spending: `Оставить на счёте «${escapeHtml(plan.source_account || 'на жизнь')}»`,
-            savings: 'Перевести на накопительный',
+            savings: 'Перевести в накопления / инвестиции',
             currency: 'Направить в валютный резерв',
         };
         container.classList.add('entity-modal-card');

@@ -192,11 +192,21 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
             f"""SELECT
                 COALESCE(SUM(CASE WHEN t.tx_type = 'income' THEN t.amount ELSE 0 END), 0) AS income,
                 COALESCE(SUM(CASE WHEN t.tx_type = 'expense' THEN t.amount ELSE 0 END), 0) AS expense,
-                COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.account_type = 'investment' THEN t.amount ELSE 0 END), 0) AS invested,
-                COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.account_type IN ('savings', 'deposit') THEN t.amount ELSE 0 END), 0) AS saved,
-                COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.account_type = 'currency' THEN t.amount ELSE 0 END), 0) AS currency_reserved,
+                COALESCE(SUM(CASE
+                    WHEN t.tx_type = 'transfer' AND ta.account_type = 'investment' THEN t.amount
+                    WHEN t.tx_type = 'income' AND sa.account_type = 'investment' THEN t.amount
+                    ELSE 0 END), 0) AS invested,
+                COALESCE(SUM(CASE
+                    WHEN t.tx_type = 'transfer' AND ta.account_type IN ('savings', 'deposit', 'investment') THEN t.amount
+                    WHEN t.tx_type = 'income' AND sa.account_type IN ('savings', 'deposit', 'investment') THEN t.amount
+                    ELSE 0 END), 0) AS saved,
+                COALESCE(SUM(CASE
+                    WHEN t.tx_type = 'transfer' AND ta.account_type = 'currency' THEN t.amount
+                    WHEN t.tx_type = 'income' AND sa.account_type = 'currency' THEN t.amount
+                    ELSE 0 END), 0) AS currency_reserved,
                 COALESCE(SUM(CASE WHEN t.tx_type = 'interest' THEN t.amount ELSE 0 END), 0) AS interest
             FROM transactions t
+            LEFT JOIN accounts sa ON sa.id = t.account_id
             LEFT JOIN accounts ta ON ta.id = t.target_account_id
             WHERE t.tx_date BETWEEN ? AND ? {person_filter}""",
             bounds_params,
@@ -332,7 +342,11 @@ def allocation_plan(
         (account for account in active_accounts if account["account_type"] in {"checking", "cash"}), None
     )
     savings = next(
-        (account for account in active_accounts if account["account_type"] in {"savings", "deposit"}), None
+        (account for account in active_accounts if account["account_type"] in {"savings", "deposit"}),
+        None,
+    ) or next(
+        (account for account in active_accounts if account["account_type"] == "investment"),
+        None,
     )
     currency = next(
         (account for account in active_accounts if account["account_type"] == "currency"), None
@@ -340,7 +354,7 @@ def allocation_plan(
     buckets = [
         bucket("spending", "Можно потратить", planned_spending, metrics["expense"]),
         bucket(
-            "savings", "На накопительный", planned_savings, metrics["saved"],
+            "savings", "В накопления / инвестиции", planned_savings, metrics["saved"],
             savings["name"] if savings else None,
         ),
         bucket(
@@ -353,7 +367,7 @@ def allocation_plan(
     elif buckets[0]["over"] > 0:
         advice = "Лимит расходов превышен. Сначала сократите необязательные траты, затем пополняйте цели."
     elif buckets[1]["remaining"] > 0:
-        advice = "Переведите рассчитанную сумму на накопительный счёт."
+        advice = "Переведите рассчитанную сумму на накопительный или инвестиционный счёт."
     elif buckets[2]["remaining"] > 0:
         advice = "Накопительный план выполнен — пополните валютный резерв."
     else:
@@ -381,8 +395,12 @@ def build_forecast(person_id: int | None = None) -> dict[str, Any]:
         f"""SELECT substr(t.tx_date, 1, 7) AS month,
             SUM(CASE WHEN t.tx_type='income' THEN t.amount ELSE 0 END) income,
             SUM(CASE WHEN t.tx_type='expense' THEN t.amount ELSE 0 END) expense,
-            SUM(CASE WHEN t.tx_type='transfer' AND ta.account_type='investment' THEN t.amount ELSE 0 END) invested
+            SUM(CASE
+                WHEN t.tx_type='transfer' AND ta.account_type='investment' THEN t.amount
+                WHEN t.tx_type='income' AND sa.account_type='investment' THEN t.amount
+                ELSE 0 END) invested
         FROM transactions t
+        LEFT JOIN accounts sa ON sa.id = t.account_id
         LEFT JOIN accounts ta ON ta.id = t.target_account_id
         WHERE t.tx_date >= date('now', '-5 months', 'start of month') {person_filter}
         GROUP BY substr(t.tx_date, 1, 7)

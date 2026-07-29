@@ -148,3 +148,30 @@ def test_income_allocation_plan_uses_savings_and_currency_accounts(client, csrf_
     assert plan["currency"]["remaining"] == 13_000
     assert plan["savings"]["destination"] == "Подушка"
     assert plan["currency"]["destination"] == "Валютный резерв"
+
+
+def test_income_paid_directly_to_investment_is_already_allocated(client, csrf_headers):
+    data = bootstrap(client)
+    investment = next(account for account in data["accounts"] if account["account_type"] == "investment")
+    income_category = next(category for category in data["categories"] if category["type"] == "income")
+    response = client.post(
+        "/api/transactions",
+        headers=csrf_headers,
+        json={
+            "tx_type": "income",
+            "amount": 14_500.75,
+            "tx_date": date.today().isoformat(),
+            "category_id": income_category["id"],
+            "account_id": investment["id"],
+        },
+    )
+    assert response.status_code == 201
+
+    summary = client.get(f"/api/summary?period=month&anchor={date.today().isoformat()}").get_json()["data"]
+    plan = {bucket["key"]: bucket for bucket in summary["allocation_plan"]["buckets"]}
+    assert summary["current"]["income"] == 14_500.75
+    assert summary["current"]["invested"] == 14_500.75
+    assert summary["current"]["saved"] == 14_500.75
+    assert plan["savings"]["actual"] == 14_500.75
+    assert plan["savings"]["remaining"] == 0
+    assert plan["savings"]["destination"] == investment["name"]
