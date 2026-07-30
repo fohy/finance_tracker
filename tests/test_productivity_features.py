@@ -96,3 +96,32 @@ def test_income_paid_directly_to_investment_is_counted_as_invested(client, csrf_
     assert summary["current"]["income"] == 14_500.75
     assert summary["current"]["invested"] == 14_500.75
     assert summary["current"]["saved"] == 14_500.75
+
+
+def test_invested_metric_and_history_use_net_investment_and_currency_flows(client, csrf_headers):
+    data = bootstrap(client)
+    checking = next(account for account in data["accounts"] if account["account_type"] == "checking")
+    investment = next(account for account in data["accounts"] if account["account_type"] == "investment")
+    currency_response = client.post(
+        "/api/accounts",
+        headers=csrf_headers,
+        json={"name": "Евро", "account_type": "currency", "currency_code": "EUR", "exchange_rate": 100},
+    )
+    currency_id = currency_response.get_json()["data"]["id"]
+
+    transfers = [
+        {"amount": 1_000, "account_id": checking["id"], "target_account_id": investment["id"]},
+        {"amount": 250, "account_id": investment["id"], "target_account_id": checking["id"]},
+        {"amount": 1_000, "target_amount": 10, "account_id": checking["id"], "target_account_id": currency_id},
+        {"amount": 4, "target_amount": 400, "account_id": currency_id, "target_account_id": checking["id"]},
+    ]
+    for transfer in transfers:
+        response = client.post(
+            "/api/transactions", headers=csrf_headers, json={"tx_type": "transfer", **transfer}
+        )
+        assert response.status_code == 201
+
+    summary = client.get(f"/api/summary?period=month&anchor={date.today().isoformat()}").get_json()["data"]
+    assert summary["current"]["invested"] == 1_350
+    history = client.get("/api/investment-balance-history").get_json()["data"]
+    assert history[-1]["invested"] == 1_350

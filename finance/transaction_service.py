@@ -87,14 +87,14 @@ def create_transaction(
     if amount <= 0:
         raise DomainError("Сумма должна быть больше нуля")
     source = get_db().execute(
-        "SELECT account_type, is_active FROM accounts WHERE id = ?", (account_id,)
+        "SELECT account_type, exchange_rate, is_active FROM accounts WHERE id = ?", (account_id,)
     ).fetchone()
     if not source:
         raise NotFoundError("Счёт не найден")
     if not source["is_active"]:
         raise DomainError("Исходный счёт отключён")
-    if source["account_type"] == "currency":
-        raise DomainError("Валютный счёт пока можно использовать только как счёт назначения")
+    if source["account_type"] == "currency" and tx_type != "transfer":
+        raise DomainError("Валютный счёт можно использовать только для переводов")
     if person_id is not None:
         _require_entity("people", person_id, "Участник")
     if tx_type == "transfer":
@@ -109,7 +109,16 @@ def create_transaction(
             raise DomainError("Нельзя перевести деньги на тот же счёт")
         if category_id is not None:
             raise DomainError("У перевода не может быть категории")
-        if target["account_type"] == "currency":
+        if source["account_type"] == "currency":
+            source_value = amount * float(source["exchange_rate"])
+            target_rate = float(target["exchange_rate"]) if target["account_type"] == "currency" else 1.0
+            expected = source_value / target_rate
+            if target_amount is None:
+                target_amount = expected
+            credited_value = target_amount * target_rate
+            if not source_value * 0.75 <= credited_value <= source_value * 1.25:
+                raise DomainError("Сумма зачисления слишком сильно отличается от настроенного курса")
+        elif target["account_type"] == "currency":
             expected = amount / float(target["exchange_rate"])
             if target_amount is None:
                 target_amount = expected

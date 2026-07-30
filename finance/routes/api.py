@@ -17,6 +17,7 @@ from ..services import (
     category_budget_status,
     get_summary,
     goal_progress,
+    investment_balance_series,
     parse_date,
     period_bounds,
     shift_period,
@@ -318,6 +319,12 @@ def accounts():
     return ok([account_dict(r) for r in get_db().execute(
         "SELECT * FROM accounts ORDER BY is_active DESC, account_type, name"
     )])
+
+
+@api_bp.get("/investment-balance-history")
+def investment_balance_history():
+    accrue_interest()
+    return ok(investment_balance_series())
 
 
 @api_bp.post("/accounts")

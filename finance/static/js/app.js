@@ -334,11 +334,19 @@
         form.account_id.innerHTML = accountOptions(null, false);
         form.target_account_id.innerHTML = accountOptions();
         const targetAmountField = $('#targetAmountField');
+        const amountCurrency = $('#amountCurrency');
         const syncTargetAmount = () => {
+            const source = state.bootstrap.accounts.find(account => account.id === Number(form.account_id.value));
             const target = state.bootstrap.accounts.find(account => account.id === Number(form.target_account_id.value));
-            targetAmountField.classList.toggle('hidden', form.tx_type.value !== 'transfer' || target?.account_type !== 'currency');
+            const isTransfer = form.tx_type.value === 'transfer';
+            const needsConversion = isTransfer && [source, target].some(account => account?.account_type === 'currency');
+            amountCurrency.textContent = isTransfer && source?.account_type === 'currency'
+                ? source.currency_code : (state.bootstrap.settings.currency || '₽');
+            targetAmountField.classList.toggle('hidden', !needsConversion);
+            if (!needsConversion) form.target_amount.value = '';
             targetAmountField.firstChild.textContent = target?.account_type === 'currency'
-                ? `Сумма зачисления, ${target.currency_code} ` : 'Сумма зачисления ';
+                ? `Сумма зачисления, ${target.currency_code} `
+                : `Сумма зачисления, ${state.bootstrap.settings.currency || '₽'} `;
         };
 
         const setType = type => {
@@ -355,7 +363,7 @@
                 targetField.classList.remove('hidden');
                 form.category_id.required = false;
                 form.target_account_id.required = true;
-                form.account_id.innerHTML = accountOptions(null, false);
+                form.account_id.innerHTML = accountOptions();
                 form.target_account_id.innerHTML = accountOptions();
                 syncTargetAmount();
             } else {
@@ -367,10 +375,12 @@
                 form.account_id.innerHTML = accountOptions(null, false);
                 targetAmountField.classList.add('hidden');
                 form.target_amount.value = '';
+                amountCurrency.textContent = state.bootstrap.settings.currency || '₽';
             }
         };
 
         form.target_account_id.addEventListener('change', syncTargetAmount);
+        form.account_id.addEventListener('change', syncTargetAmount);
 
         $$('[data-tx-type]', form).forEach(btn => btn.addEventListener('click', () => setType(btn.dataset.txType)));
         $$('[data-open-transaction]').forEach(btn => btn.addEventListener('click', () => {
@@ -489,6 +499,8 @@
         </div>`;
     }
 
+    let chartSequence = 0;
+
     function drawLineChart(container, rows, keys = ['income', 'expense', 'invested']) {
         if (!container) return;
         if (!rows.length) {
@@ -496,21 +508,42 @@
             return;
         }
         const width = 900, height = 280, left = 45, right = 18, top = 18, bottom = 35;
-        const maxValue = Math.max(1, ...rows.flatMap(row => keys.map(key => Number(row[key] || 0))));
+        const series = keys.filter(Boolean);
+        const values = rows.flatMap(row => series.map(key => Number(row[key] || 0)));
+        const rawMin = Math.min(0, ...values);
+        const rawMax = Math.max(0, ...values);
+        const padding = Math.max(1, (rawMax - rawMin) * .08);
+        const minValue = rawMin < 0 ? rawMin - padding : 0;
+        const maxValue = rawMax + padding;
+        const valueRange = Math.max(1, maxValue - minValue);
         const x = index => left + (rows.length === 1 ? (width - left - right) / 2 : index * (width - left - right) / (rows.length - 1));
-        const y = value => top + (height - top - bottom) * (1 - Number(value || 0) / maxValue);
+        const y = value => top + (height - top - bottom) * (1 - (Number(value || 0) - minValue) / valueRange);
         const path = key => rows.map((row, index) => `${index ? 'L' : 'M'} ${x(index).toFixed(1)} ${y(row[key]).toFixed(1)}`).join(' ');
+        const baseline = y(0).toFixed(1);
         const grid = [0, .25, .5, .75, 1].map(part => {
             const yy = top + (height - top - bottom) * part;
-            const label = compactMoney(maxValue * (1 - part));
-            return `<line class="svg-grid" x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}"/><text x="0" y="${yy+4}">${label}</text>`;
+            const value = maxValue - valueRange * part;
+            const label = compactMoney(value);
+            const zeroClass = Math.abs(value) < valueRange * .03 ? ' svg-grid-zero' : '';
+            return `<line class="svg-grid${zeroClass}" x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}"/><text x="0" y="${yy+4}">${label}</text>`;
         }).join('');
         const labels = rows.map((row, index) => {
             if (rows.length > 12 && index % Math.ceil(rows.length / 8) !== 0 && index !== rows.length - 1) return '';
             const label = /^\d{4}-\d{2}-\d{2}$/.test(String(row.label)) ? formatDate(row.label, { day: 'numeric', month: 'short' }) : String(row.label);
             return `<text text-anchor="middle" x="${x(index)}" y="${height-8}">${escapeHtml(label)}</text>`;
         }).join('');
-        container.innerHTML = `<svg class="svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${grid}<path class="svg-income" d="${path(keys[0])}"/><path class="svg-expense" d="${path(keys[1])}"/>${keys[2] ? `<path class="svg-invested" d="${path(keys[2])}"/>` : ''}${labels}</svg>`;
+        const chartId = ++chartSequence;
+        const tones = { income: 'var(--green)', expense: 'var(--red)', invested: 'var(--purple)' };
+        const defs = series.map(key => `<linearGradient id="chart-fill-${chartId}-${key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".28"/><stop offset="1" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".015"/></linearGradient>`).join('');
+        const plots = series.map(key => {
+            const line = path(key);
+            const area = `${line} L ${x(rows.length - 1).toFixed(1)} ${baseline} L ${x(0).toFixed(1)} ${baseline} Z`;
+            const pointStep = Math.max(1, Math.ceil(rows.length / 18));
+            const points = rows.map((row, index) => (index % pointStep === 0 || index === rows.length - 1)
+                ? `<circle class="svg-point svg-point-${key}" cx="${x(index).toFixed(1)}" cy="${y(row[key]).toFixed(1)}" r="3.2"><title>${escapeHtml(String(row.label))}: ${money(row[key])}</title></circle>` : '').join('');
+            return `<path class="svg-area" fill="url(#chart-fill-${chartId}-${key})" d="${area}"/><path class="svg-${key}" d="${line}"/>${points}`;
+        }).join('');
+        container.innerHTML = `<svg class="svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="График динамики"><defs>${defs}</defs>${grid}${plots}${labels}</svg>`;
     }
 
     async function loadDashboard() {
@@ -693,17 +726,19 @@
     }
 
     async function loadInvestments() {
-        const [accounts, tx] = await Promise.all([
+        const [accounts, tx, history] = await Promise.all([
             api('/api/accounts'),
             api('/api/transactions?period=month&anchor=' + state.anchor + '&per_page=20'),
+            api('/api/investment-balance-history'),
         ]);
-        const investments = accounts.filter(a => ['savings', 'deposit', 'investment'].includes(a.account_type) && a.is_active);
-        const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', investment: 'Инвестиционный' };
-        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${money(account.balance)}</strong><div class="account-meta"><span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span></div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить ставку</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный или инвестиционный счёт в настройках</div>';
+        const investments = accounts.filter(a => ['savings', 'deposit', 'currency', 'investment'].includes(a.account_type) && a.is_active);
+        const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', currency: 'Валютный', investment: 'Инвестиционный' };
+        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${account.account_type === 'currency' ? nativeMoney(account.balance, account.currency_code) : money(account.balance)}</strong><div class="account-meta">${account.account_type === 'currency' ? `<span>В основной валюте: ${money(account.base_equivalent)}</span><span>Курс: ${Number(account.exchange_rate).toFixed(4)}</span>` : `<span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span>`}</div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить счёт</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный, валютный или инвестиционный счёт в настройках</div>';
         $('#investmentTransactions').innerHTML = tx.items.filter(item => ['transfer', 'interest'].includes(item.tx_type)).map(transactionRow).join('') || '<div class="empty-state">Пополнений пока нет</div>';
         $$('[data-configure-interest]').forEach(button => button.addEventListener('click', () => {
             openAccountForm(accounts.find(account => account.id === Number(button.dataset.configureInterest)));
         }));
+        drawLineChart($('#investmentProjection'), history, ['invested']);
         setupInvestmentCalculator(investments.find(a => a.account_type === 'investment') || investments[0]);
     }
 
@@ -720,13 +755,10 @@
             const rate = annual / 12;
             const months = years * 12;
             let value = principal;
-            const series = [];
             for (let i = 0; i <= months; i++) {
                 if (i > 0) value = value * (1 + rate) + monthly;
-                if (i % Math.max(1, Math.round(months / 24)) === 0 || i === months) series.push({ label: `${i} мес`, income: value, expense: 0 });
             }
             $('#futureValue').textContent = money(value);
-            drawLineChart($('#investmentProjection'), series, ['income', 'expense', null]);
         };
         form.addEventListener('input', calculate);
         calculate();

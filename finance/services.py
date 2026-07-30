@@ -7,6 +7,26 @@ from typing import Any
 from .db import get_db
 
 
+_INVESTED_FLOW_SQL = """
+    CASE
+        WHEN t.tx_type = 'income' AND sa.account_type IN ('investment', 'currency')
+            THEN t.amount * CASE WHEN sa.account_type = 'currency' THEN sa.exchange_rate ELSE 1 END
+        ELSE 0
+    END
+    + CASE
+        WHEN t.tx_type = 'transfer' AND sa.account_type IN ('investment', 'currency')
+            THEN -t.amount * CASE WHEN sa.account_type = 'currency' THEN sa.exchange_rate ELSE 1 END
+        ELSE 0
+    END
+    + CASE
+        WHEN t.tx_type = 'transfer' AND ta.account_type IN ('investment', 'currency')
+            THEN COALESCE(t.target_amount, t.amount)
+                * CASE WHEN ta.account_type = 'currency' THEN ta.exchange_rate ELSE 1 END
+        ELSE 0
+    END
+"""
+
+
 def parse_date(value: str | None, default: date | None = None) -> date:
     if not value:
         return default or date.today()
@@ -192,10 +212,7 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
             f"""SELECT
                 COALESCE(SUM(CASE WHEN t.tx_type = 'income' THEN t.amount ELSE 0 END), 0) AS income,
                 COALESCE(SUM(CASE WHEN t.tx_type = 'expense' THEN t.amount ELSE 0 END), 0) AS expense,
-                COALESCE(SUM(CASE
-                    WHEN t.tx_type = 'transfer' AND ta.account_type = 'investment' THEN t.amount
-                    WHEN t.tx_type = 'income' AND sa.account_type = 'investment' THEN t.amount
-                    ELSE 0 END), 0) AS invested,
+                COALESCE(SUM({_INVESTED_FLOW_SQL}), 0) AS invested,
                 COALESCE(SUM(CASE
                     WHEN t.tx_type = 'transfer' AND ta.account_type IN ('savings', 'deposit', 'investment') THEN t.amount
                     WHEN t.tx_type = 'income' AND sa.account_type IN ('savings', 'deposit', 'investment') THEN t.amount
@@ -316,10 +333,7 @@ def build_forecast(person_id: int | None = None) -> dict[str, Any]:
         f"""SELECT substr(t.tx_date, 1, 7) AS month,
             SUM(CASE WHEN t.tx_type='income' THEN t.amount ELSE 0 END) income,
             SUM(CASE WHEN t.tx_type='expense' THEN t.amount ELSE 0 END) expense,
-            SUM(CASE
-                WHEN t.tx_type='transfer' AND ta.account_type='investment' THEN t.amount
-                WHEN t.tx_type='income' AND sa.account_type='investment' THEN t.amount
-                ELSE 0 END) invested
+            SUM({_INVESTED_FLOW_SQL}) invested
         FROM transactions t
         LEFT JOIN accounts sa ON sa.id = t.account_id
         LEFT JOIN accounts ta ON ta.id = t.target_account_id
@@ -409,23 +423,75 @@ def spending_statistics(period: str, anchor: str | None, person_id: int | None =
 def trend_series(period: str, anchor: str | None, person_id: int | None = None) -> list[dict[str, Any]]:
     db = get_db()
     start, end = period_bounds(period, anchor)
-    person_filter = " AND person_id = ?" if person_id else ""
+    person_filter = " AND t.person_id = ?" if person_id else ""
     params: list[Any] = [start.isoformat(), end.isoformat()]
     if person_id:
         params.append(person_id)
     group_expr = "tx_date" if period in {"day", "week"} else "strftime('%Y-%m-%d', tx_date)"
     rows = db.execute(
         f"""SELECT {group_expr} label,
-            SUM(CASE WHEN tx_type='income' THEN amount ELSE 0 END) income,
-            SUM(CASE WHEN tx_type='expense' THEN amount ELSE 0 END) expense,
-            SUM(CASE WHEN tx_type='transfer' THEN amount ELSE 0 END) invested
-        FROM transactions
-        WHERE tx_date BETWEEN ? AND ? {person_filter}
+            SUM(CASE WHEN t.tx_type='income' THEN t.amount ELSE 0 END) income,
+            SUM(CASE WHEN t.tx_type='expense' THEN t.amount ELSE 0 END) expense,
+            SUM({_INVESTED_FLOW_SQL}) invested
+        FROM transactions t
+        LEFT JOIN accounts sa ON sa.id = t.account_id
+        LEFT JOIN accounts ta ON ta.id = t.target_account_id
+        WHERE t.tx_date BETWEEN ? AND ? {person_filter}
         GROUP BY {group_expr}
         ORDER BY label""",
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def investment_balance_series() -> list[dict[str, Any]]:
+    """Return the ledger history of investment and currency account balances in base currency."""
+    db = get_db()
+    current_row = db.execute(
+        """SELECT COALESCE(SUM(balance * CASE WHEN account_type = 'currency' THEN exchange_rate ELSE 1 END), 0) balance
+           FROM accounts WHERE account_type IN ('investment', 'currency')"""
+    ).fetchone()
+    current_balance = float(current_row["balance"])
+    rows = db.execute(
+        """SELECT t.tx_date label, SUM(
+               CASE
+                   WHEN sa.account_type IN ('investment', 'currency') AND t.tx_type IN ('income', 'interest')
+                       THEN t.amount * CASE WHEN sa.account_type = 'currency' THEN sa.exchange_rate ELSE 1 END
+                   WHEN sa.account_type IN ('investment', 'currency') AND t.tx_type IN ('expense', 'transfer')
+                       THEN -t.amount * CASE WHEN sa.account_type = 'currency' THEN sa.exchange_rate ELSE 1 END
+                   ELSE 0
+               END
+               + CASE
+                   WHEN ta.account_type IN ('investment', 'currency') AND t.tx_type = 'transfer'
+                       THEN COALESCE(t.target_amount, t.amount)
+                           * CASE WHEN ta.account_type = 'currency' THEN ta.exchange_rate ELSE 1 END
+                   ELSE 0
+               END
+           ) delta
+           FROM transactions t
+           LEFT JOIN accounts sa ON sa.id = t.account_id
+           LEFT JOIN accounts ta ON ta.id = t.target_account_id
+           WHERE sa.account_type IN ('investment', 'currency')
+              OR ta.account_type IN ('investment', 'currency')
+           GROUP BY t.tx_date
+           ORDER BY t.tx_date"""
+    ).fetchall()
+    if not rows:
+        return [{"label": date.today().isoformat(), "invested": round(current_balance, 2)}] if current_balance else []
+
+    opening_balance = current_balance - sum(float(row["delta"] or 0) for row in rows)
+    running_balance = opening_balance
+    result = [{
+        "label": (parse_date(rows[0]["label"]) - timedelta(days=1)).isoformat(),
+        "invested": round(opening_balance, 2),
+    }]
+    for row in rows:
+        running_balance += float(row["delta"] or 0)
+        result.append({"label": row["label"], "invested": round(running_balance, 2)})
+    today = date.today().isoformat()
+    if result[-1]["label"] < today:
+        result.append({"label": today, "invested": round(current_balance, 2)})
+    return result
 
 
 def goal_progress(item: dict[str, Any]) -> dict[str, Any]:
