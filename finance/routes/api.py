@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from calendar import monthrange
 from datetime import date, timedelta
 from io import StringIO
 from typing import Any
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from ..auth import current_user_id
 from ..db import get_db
 from ..errors import NotFoundError
+from ..receipt_service import fetch_receipt, normalise_product_name, parse_receipt_qr
 from ..services import (
     accrue_interest,
     category_breakdown,
     category_budget_status,
     get_summary,
     goal_progress,
+    investment_balance_series,
     parse_date,
     period_bounds,
     shift_period,
@@ -282,6 +286,101 @@ def create_transaction():
     return ok({"id": transaction_id}, 201)
 
 
+@api_bp.post("/receipts/parse")
+def parse_receipt():
+    """Extract the fields embedded in a fiscal QR; no receipt data leaves the app."""
+    return ok(parse_receipt_qr(payload().get("qr")))
+
+
+@api_bp.post("/receipts/analyze")
+def analyze_receipt():
+    receipt = fetch_receipt(payload().get("qr"), current_app.config["PROVERKACHEKA_TOKEN"])
+    db = get_db()
+    categories = {
+        row["name"]: row["id"]
+        for row in db.execute("SELECT id, name FROM categories WHERE type = 'expense'")
+    }
+    learned = {
+        row["normalized_name"]: row["category_id"]
+        for row in db.execute("SELECT normalized_name, category_id FROM receipt_product_categories")
+    }
+    for item in receipt["items"]:
+        learned_category = learned.get(normalise_product_name(item["name"]))
+        item["category_id"] = learned_category or categories.get(item.pop("category_name", None))
+        if learned_category:
+            item["confidence"] = "learned"
+    return ok(receipt)
+
+
+@api_bp.post("/receipts/import")
+def import_receipt():
+    data = payload()
+    receipt = parse_receipt_qr(data.get("qr"))
+    groups = data.get("groups")
+    mappings = data.get("mappings") or []
+    if not isinstance(groups, list) or not groups:
+        raise ValueError("В чеке нет расходов для добавления")
+    db = get_db()
+    fingerprint = hashlib.sha256(receipt["raw"].encode("utf-8")).hexdigest()
+    if db.execute("SELECT 1 FROM receipt_imports WHERE fingerprint = ?", (fingerprint,)).fetchone():
+        raise ValueError("Этот чек уже был добавлен")
+    account = db.execute(
+        """SELECT id FROM accounts WHERE kind = 'life' AND is_active = 1
+           ORDER BY CASE WHEN account_type = 'checking' THEN 0 ELSE 1 END, id LIMIT 1"""
+    ).fetchone()
+    if not account:
+        raise ValueError("Не найден активный счёт «на жизнь»")
+    total = 0.0
+    transaction_ids = []
+    try:
+        for group in groups:
+            category_id = int(group.get("category_id"))
+            category = db.execute(
+                "SELECT name FROM categories WHERE id = ? AND type = 'expense'", (category_id,)
+            ).fetchone()
+            if not category:
+                raise ValueError("Выбрана неверная категория расхода")
+            amount = as_float(group.get("amount"), "Сумма категории")
+            total += amount
+            names = [str(name).strip() for name in group.get("items", []) if str(name).strip()]
+            note = f"Чек: {', '.join(names)}"[:500]
+            transaction_ids.append(create_transaction_record(
+                tx_type="expense", amount=amount, tx_date=receipt["date"],
+                account_id=int(account["id"]), target_account_id=None,
+                category_id=category_id, person_id=None, note=note,
+                actor_user_id=current_user_id(), commit=False,
+            ))
+        if abs(total - receipt["amount"]) > 0.02:
+            raise ValueError("Сумма категорий не совпадает с итогом чека")
+        for mapping in mappings:
+            name = str(mapping.get("name") or "").strip()
+            normalized_name = normalise_product_name(name)
+            category_id = int(mapping.get("category_id"))
+            if not normalized_name or not db.execute(
+                "SELECT 1 FROM categories WHERE id = ? AND type = 'expense'", (category_id,)
+            ).fetchone():
+                raise ValueError("Нельзя запомнить некорректную категорию товара")
+            db.execute(
+                """INSERT INTO receipt_product_categories(normalized_name, display_name, category_id)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(normalized_name) DO UPDATE SET
+                       display_name = excluded.display_name,
+                       category_id = excluded.category_id,
+                       times_used = receipt_product_categories.times_used + 1,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (normalized_name, name[:300], category_id),
+            )
+        db.execute(
+            "INSERT INTO receipt_imports(fingerprint, transaction_ids) VALUES (?, ?)",
+            (fingerprint, json.dumps(transaction_ids)),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return ok({"transaction_ids": transaction_ids, "count": len(transaction_ids)}, 201)
+
+
 @api_bp.delete("/transactions/<int:tx_id>")
 def delete_transaction(tx_id: int):
     delete_transaction_record(tx_id, actor_user_id=current_user_id())
@@ -318,6 +417,12 @@ def accounts():
     return ok([account_dict(r) for r in get_db().execute(
         "SELECT * FROM accounts ORDER BY is_active DESC, account_type, name"
     )])
+
+
+@api_bp.get("/investment-balance-history")
+def investment_balance_history():
+    accrue_interest()
+    return ok(investment_balance_series())
 
 
 @api_bp.post("/accounts")

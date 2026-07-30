@@ -8,6 +8,7 @@ services:
       DATABASE_PATH: /app/instance/finance.db
       SECRET_KEY: ${SECRET_KEY:-local-finance-secret}
       SEED_DEMO: ${SEED_DEMO:-0}
+      PROVERKACHEKA_TOKEN: ${PROVERKACHEKA_TOKEN:-}
     volumes:
       - ./instance:/app/instance
     restart: unless-stopped

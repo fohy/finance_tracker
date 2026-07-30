@@ -72,8 +72,25 @@
                 <button type="button" data-tx-type="transfer">Перевод</button>
             </div>
             <input type="hidden" name="tx_type" value="expense">
+            <div class="receipt-scan span-2" id="receiptScan">
+                <button type="button" class="btn btn-secondary" id="scanReceiptBtn">Сканировать чек</button>
+                <span class="receipt-scan__hint">Камера заполнит сумму и дату из QR-кода</span>
+                <div class="receipt-scanner hidden" id="receiptScanner">
+                    <video id="receiptVideo" playsinline muted></video>
+                    <div class="receipt-scanner__frame" aria-hidden="true"></div>
+                    <div class="receipt-scanner__actions">
+                        <label class="btn btn-secondary receipt-file">Фото чека<input id="receiptImage" type="file" accept="image/*" capture="environment"></label>
+                        <button type="button" class="btn btn-ghost" id="closeReceiptScanner">Закрыть камеру</button>
+                    </div>
+                    <label class="receipt-paste">Или вставьте содержимое QR
+                        <span><input id="receiptQrText" autocomplete="off" placeholder="t=20260730T1200&s=…&fn=…"><button type="button" class="btn btn-secondary" id="parseReceiptBtn">Применить</button></span>
+                    </label>
+                    <p class="receipt-status" id="receiptStatus" role="status"></p>
+                    <div class="receipt-review hidden" id="receiptReview"></div>
+                </div>
+            </div>
             <label>Сумма
-                <div class="money-input"><input name="amount" type="number" min="0.01" step="0.01" required placeholder="0"><span data-currency>₽</span></div>
+                <div class="money-input"><input name="amount" type="number" min="0.01" step="0.01" required placeholder="0"><span id="amountCurrency" data-currency>₽</span></div>
             </label>
             <label>Дата
                 <input name="tx_date" type="date" required>
@@ -98,7 +115,7 @@
             </label>
             <div class="modal-actions span-2">
                 <button type="button" class="btn btn-ghost" data-close-modal>Отмена</button>
-                <button type="submit" class="btn btn-primary">Сохранить операцию</button>
+                <button type="submit" class="btn btn-primary" id="saveTransactionBtn">Сохранить операцию</button>
             </div>
         </form>
     </div>
@@ -108,6 +125,7 @@
     <div class="modal-card" id="entityModalContent" role="dialog" aria-modal="true"></div>
 </div>
 <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+<script src="{{ asset_url('vendor/jsQR.js') }}"></script>
 <script src="{{ asset_url('js/app.js') }}"></script>
 </body>
 </html>

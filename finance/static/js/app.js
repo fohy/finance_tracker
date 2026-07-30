@@ -334,11 +334,20 @@
         form.account_id.innerHTML = accountOptions(null, false);
         form.target_account_id.innerHTML = accountOptions();
         const targetAmountField = $('#targetAmountField');
+        const amountCurrency = $('#amountCurrency');
+        const receiptScan = $('#receiptScan');
         const syncTargetAmount = () => {
+            const source = state.bootstrap.accounts.find(account => account.id === Number(form.account_id.value));
             const target = state.bootstrap.accounts.find(account => account.id === Number(form.target_account_id.value));
-            targetAmountField.classList.toggle('hidden', form.tx_type.value !== 'transfer' || target?.account_type !== 'currency');
+            const isTransfer = form.tx_type.value === 'transfer';
+            const needsConversion = isTransfer && [source, target].some(account => account?.account_type === 'currency');
+            amountCurrency.textContent = isTransfer && source?.account_type === 'currency'
+                ? source.currency_code : (state.bootstrap.settings.currency || '₽');
+            targetAmountField.classList.toggle('hidden', !needsConversion);
+            if (!needsConversion) form.target_amount.value = '';
             targetAmountField.firstChild.textContent = target?.account_type === 'currency'
-                ? `Сумма зачисления, ${target.currency_code} ` : 'Сумма зачисления ';
+                ? `Сумма зачисления, ${target.currency_code} `
+                : `Сумма зачисления, ${state.bootstrap.settings.currency || '₽'} `;
         };
 
         const setType = type => {
@@ -350,12 +359,13 @@
             });
             const categoryField = $('#categoryField');
             const targetField = $('#targetAccountField');
+            receiptScan?.classList.toggle('hidden', type !== 'expense');
             if (type === 'transfer') {
                 categoryField.classList.add('hidden');
                 targetField.classList.remove('hidden');
                 form.category_id.required = false;
                 form.target_account_id.required = true;
-                form.account_id.innerHTML = accountOptions(null, false);
+                form.account_id.innerHTML = accountOptions();
                 form.target_account_id.innerHTML = accountOptions();
                 syncTargetAmount();
             } else {
@@ -367,10 +377,14 @@
                 form.account_id.innerHTML = accountOptions(null, false);
                 targetAmountField.classList.add('hidden');
                 form.target_amount.value = '';
+                amountCurrency.textContent = state.bootstrap.settings.currency || '₽';
             }
         };
 
         form.target_account_id.addEventListener('change', syncTargetAmount);
+        form.account_id.addEventListener('change', syncTargetAmount);
+
+        setupReceiptScanner(form);
 
         $$('[data-tx-type]', form).forEach(btn => btn.addEventListener('click', () => setType(btn.dataset.txType)));
         $$('[data-open-transaction]').forEach(btn => btn.addEventListener('click', () => {
@@ -404,6 +418,11 @@
 
         form.addEventListener('submit', async event => {
             event.preventDefault();
+            if (form.dataset.receiptPending === 'true') {
+                toast('Сначала распределите товары чека и нажмите «Добавить расходы»', 'error');
+                $('#receiptReview')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
+            }
             const data = Object.fromEntries(new FormData(form).entries());
             try {
                 await api('/api/transactions', { method: 'POST', body: data });
@@ -415,6 +434,206 @@
                 await loadCurrentPage();
             } catch (error) { toast(error.message, 'error'); }
         });
+    }
+
+    function setupReceiptScanner(form) {
+        const panel = $('#receiptScanner');
+        const video = $('#receiptVideo');
+        const status = $('#receiptStatus');
+        const review = $('#receiptReview');
+        const qrInput = $('#receiptQrText');
+        const scanButton = $('#scanReceiptBtn');
+        const manualSaveButton = $('#saveTransactionBtn');
+        if (!panel || !video || !scanButton) return;
+        let stream = null;
+        let scanning = false;
+        const scanCanvas = document.createElement('canvas');
+        const scanContext = scanCanvas.getContext('2d', { willReadFrequently: true });
+
+        const setStatus = (message, error = false) => {
+            status.textContent = message;
+            status.classList.toggle('is-error', error);
+        };
+        const setReceiptPending = pending => {
+            form.dataset.receiptPending = String(pending);
+            if (!manualSaveButton) return;
+            manualSaveButton.disabled = pending;
+            manualSaveButton.textContent = pending ? 'Сначала распределите товары выше' : 'Сохранить операцию';
+        };
+        const stopCamera = () => {
+            scanning = false;
+            stream?.getTracks().forEach(track => track.stop());
+            stream = null;
+            video.srcObject = null;
+        };
+        const importItems = async receipt => {
+            const grouped = new Map();
+            receipt.items.forEach(item => {
+                const categoryId = Number(item.category_id);
+                const group = grouped.get(categoryId) || { category_id: categoryId, amount: 0, items: [] };
+                group.amount = Math.round((group.amount + Number(item.amount)) * 100) / 100;
+                group.items.push(item.name);
+                grouped.set(categoryId, group);
+            });
+            setStatus('Добавляем расходы по категориям…');
+            const result = await api('/api/receipts/import', {
+                method: 'POST', body: {
+                    qr: receipt.raw,
+                    groups: [...grouped.values()],
+                    mappings: receipt.items
+                        .filter(item => item.should_learn)
+                        .map(item => ({ name: item.name, category_id: item.category_id })),
+                }
+            });
+            setReceiptPending(false);
+            toast(`Чек добавлен: ${result.count} ${result.count === 1 ? 'операция' : 'операции'}`);
+            stopCamera();
+            closeModals();
+            await refreshBootstrap();
+            await loadCurrentPage();
+        };
+        const askForCategories = receipt => {
+            setReceiptPending(true);
+            const uncertainGroups = [...receipt.items
+                .filter(item => !item.category_id)
+                .reduce((groups, item) => {
+                    const key = item.name.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
+                        .replace(/[^a-zа-я0-9]+/gi, ' ').trim();
+                    const group = groups.get(key) || { name: item.name, amount: 0, items: [] };
+                    group.amount = Math.round((group.amount + Number(item.amount)) * 100) / 100;
+                    group.items.push(item);
+                    groups.set(key, group);
+                    return groups;
+                }, new Map()).values()];
+            review.classList.remove('hidden');
+            review.innerHTML = `<h3>Куда отнести эти товары?</h3><p>Для остальных позиций категории уже определены.</p>
+                <div class="receipt-review__items">${uncertainGroups.map((group, index) => `
+                    <label><span><strong>${escapeHtml(group.name)}</strong><small>${group.items.length > 1 ? `${group.items.length} шт. · ` : ''}${money(group.amount)}</small></span>
+                        <select data-receipt-item="${index}" required><option value="">Выберите категорию</option>${categoryOptions('expense')}</select>
+                    </label>`).join('')}</div>
+                <button type="button" class="btn btn-primary" id="confirmReceiptCategories">Добавить расходы</button>`;
+            setupCustomSelects(review);
+            $('#confirmReceiptCategories', review).addEventListener('click', async event => {
+                const button = event.currentTarget;
+                const selects = $$('[data-receipt-item]', review);
+                if (selects.some(select => !select.value)) {
+                    setStatus('Выберите категорию для каждого сомнительного товара', true);
+                    return;
+                }
+                selects.forEach((select, index) => {
+                    const group = uncertainGroups[index];
+                    group.items.forEach(item => { item.category_id = Number(select.value); });
+                    group.items[0].should_learn = true;
+                });
+                button.disabled = true;
+                try { await importItems(receipt); } catch (error) { button.disabled = false; setStatus(error.message, true); }
+            });
+        };
+        const applyQr = async value => {
+            setReceiptPending(false);
+            review.classList.add('hidden');
+            review.replaceChildren();
+            try {
+                setStatus('Читаем сумму и дату из QR…');
+                const parsed = await api('/api/receipts/parse', { method: 'POST', body: { qr: value } });
+                if (!parsed.is_expense) throw new Error('Этот чек относится к возврату или приходу, а не к расходу');
+                form.amount.value = parsed.amount.toFixed(2);
+                form.tx_date.value = parsed.date;
+                form.note.value = form.note.value || parsed.note;
+                stopCamera();
+                panel.classList.add('receipt-scanner--done');
+                setStatus(`Сумма и дата заполнены. Получаем товары из ProverkaCheka…`);
+                const receipt = await api('/api/receipts/analyze', { method: 'POST', body: { qr: value } });
+                if (!receipt.is_expense) throw new Error('Этот чек относится к возврату или приходу, а не к расходу');
+                if (receipt.items.every(item => item.category_id)) {
+                    await importItems(receipt);
+                } else {
+                    setStatus(`Чек на ${money(receipt.amount)}: уточните категории ниже`);
+                    askForCategories(receipt);
+                }
+            } catch (error) {
+                if (review.classList.contains('hidden')) setReceiptPending(false);
+                setStatus(error.message, true);
+            }
+        };
+        const detectQr = async source => {
+            if ('BarcodeDetector' in window) {
+                const codes = await new BarcodeDetector({ formats: ['qr_code'] }).detect(source);
+                return codes[0]?.rawValue || null;
+            }
+            if (typeof window.jsQR !== 'function') return null;
+            const width = source.videoWidth || source.width;
+            const height = source.videoHeight || source.height;
+            if (!width || !height) return null;
+            const maxWidth = 900;
+            const scale = Math.min(1, maxWidth / width);
+            scanCanvas.width = Math.round(width * scale);
+            scanCanvas.height = Math.round(height * scale);
+            scanContext.drawImage(source, 0, 0, scanCanvas.width, scanCanvas.height);
+            const pixels = scanContext.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+            return window.jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'attemptBoth' })?.data || null;
+        };
+        const detectLoop = async () => {
+            if (!scanning) return;
+            try {
+                if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                    const value = await detectQr(video);
+                    if (value) { await applyQr(value); return; }
+                }
+            } catch (error) { /* a frame can become unavailable while the camera closes */ }
+            if (scanning) requestAnimationFrame(detectLoop);
+        };
+        const openScanner = async () => {
+            panel.classList.remove('hidden', 'receipt-scanner--done');
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setStatus('Этот браузер не предоставляет доступ к камере. Откройте приложение через localhost или HTTPS.', true);
+                return;
+            }
+            try {
+                setStatus('Разрешите браузеру доступ к камере…');
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+                video.srcObject = stream;
+                await video.play();
+                scanning = true;
+                setStatus('Наведите камеру на QR-код внизу чека');
+                detectLoop();
+            } catch (error) {
+                const denied = error?.name === 'NotAllowedError';
+                setStatus(denied
+                    ? 'Доступ к камере запрещён. Разрешите его в настройках сайта у адресной строки.'
+                    : 'Не удалось открыть камеру. Проверьте, что она не занята другим приложением.', true);
+            }
+        };
+
+        scanButton.addEventListener('click', openScanner);
+        $('#closeReceiptScanner')?.addEventListener('click', () => { stopCamera(); panel.classList.add('hidden'); });
+        $('#parseReceiptBtn')?.addEventListener('click', () => applyQr(qrInput.value));
+        qrInput?.addEventListener('keydown', event => {
+            if (event.key === 'Enter') { event.preventDefault(); applyQr(qrInput.value); }
+        });
+        $('#receiptImage')?.addEventListener('change', async event => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            try {
+                setStatus('Ищем QR-код на фото…');
+                const bitmap = await createImageBitmap(file);
+                const value = await detectQr(bitmap);
+                bitmap.close();
+                if (!value) throw new Error('QR-код на фото не найден');
+                await applyQr(value);
+            } catch (error) { setStatus(error.message, true); }
+        });
+        $('#transactionModal')?.addEventListener('click', event => {
+            if (event.target === $('#transactionModal') || event.target.closest?.('[data-close-modal]')) stopCamera();
+        });
+        $$('[data-open-transaction]').forEach(button => button.addEventListener('click', () => {
+            setReceiptPending(false);
+            review.classList.add('hidden');
+            review.replaceChildren();
+            panel.classList.add('hidden');
+            setStatus('');
+        }));
+        document.addEventListener('keydown', event => { if (event.key === 'Escape') stopCamera(); });
     }
 
     function setupNavigation() {
@@ -489,6 +708,8 @@
         </div>`;
     }
 
+    let chartSequence = 0;
+
     function drawLineChart(container, rows, keys = ['income', 'expense', 'invested']) {
         if (!container) return;
         if (!rows.length) {
@@ -496,21 +717,42 @@
             return;
         }
         const width = 900, height = 280, left = 45, right = 18, top = 18, bottom = 35;
-        const maxValue = Math.max(1, ...rows.flatMap(row => keys.map(key => Number(row[key] || 0))));
+        const series = keys.filter(Boolean);
+        const values = rows.flatMap(row => series.map(key => Number(row[key] || 0)));
+        const rawMin = Math.min(0, ...values);
+        const rawMax = Math.max(0, ...values);
+        const padding = Math.max(1, (rawMax - rawMin) * .08);
+        const minValue = rawMin < 0 ? rawMin - padding : 0;
+        const maxValue = rawMax + padding;
+        const valueRange = Math.max(1, maxValue - minValue);
         const x = index => left + (rows.length === 1 ? (width - left - right) / 2 : index * (width - left - right) / (rows.length - 1));
-        const y = value => top + (height - top - bottom) * (1 - Number(value || 0) / maxValue);
+        const y = value => top + (height - top - bottom) * (1 - (Number(value || 0) - minValue) / valueRange);
         const path = key => rows.map((row, index) => `${index ? 'L' : 'M'} ${x(index).toFixed(1)} ${y(row[key]).toFixed(1)}`).join(' ');
+        const baseline = y(0).toFixed(1);
         const grid = [0, .25, .5, .75, 1].map(part => {
             const yy = top + (height - top - bottom) * part;
-            const label = compactMoney(maxValue * (1 - part));
-            return `<line class="svg-grid" x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}"/><text x="0" y="${yy+4}">${label}</text>`;
+            const value = maxValue - valueRange * part;
+            const label = compactMoney(value);
+            const zeroClass = Math.abs(value) < valueRange * .03 ? ' svg-grid-zero' : '';
+            return `<line class="svg-grid${zeroClass}" x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}"/><text x="0" y="${yy+4}">${label}</text>`;
         }).join('');
         const labels = rows.map((row, index) => {
             if (rows.length > 12 && index % Math.ceil(rows.length / 8) !== 0 && index !== rows.length - 1) return '';
             const label = /^\d{4}-\d{2}-\d{2}$/.test(String(row.label)) ? formatDate(row.label, { day: 'numeric', month: 'short' }) : String(row.label);
             return `<text text-anchor="middle" x="${x(index)}" y="${height-8}">${escapeHtml(label)}</text>`;
         }).join('');
-        container.innerHTML = `<svg class="svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${grid}<path class="svg-income" d="${path(keys[0])}"/><path class="svg-expense" d="${path(keys[1])}"/>${keys[2] ? `<path class="svg-invested" d="${path(keys[2])}"/>` : ''}${labels}</svg>`;
+        const chartId = ++chartSequence;
+        const tones = { income: 'var(--green)', expense: 'var(--red)', invested: 'var(--purple)' };
+        const defs = series.map(key => `<linearGradient id="chart-fill-${chartId}-${key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".28"/><stop offset="1" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".015"/></linearGradient>`).join('');
+        const plots = series.map(key => {
+            const line = path(key);
+            const area = `${line} L ${x(rows.length - 1).toFixed(1)} ${baseline} L ${x(0).toFixed(1)} ${baseline} Z`;
+            const pointStep = Math.max(1, Math.ceil(rows.length / 18));
+            const points = rows.map((row, index) => (index % pointStep === 0 || index === rows.length - 1)
+                ? `<circle class="svg-point svg-point-${key}" cx="${x(index).toFixed(1)}" cy="${y(row[key]).toFixed(1)}" r="3.2"><title>${escapeHtml(String(row.label))}: ${money(row[key])}</title></circle>` : '').join('');
+            return `<path class="svg-area" fill="url(#chart-fill-${chartId}-${key})" d="${area}"/><path class="svg-${key}" d="${line}"/>${points}`;
+        }).join('');
+        container.innerHTML = `<svg class="svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="График динамики"><defs>${defs}</defs>${grid}${plots}${labels}</svg>`;
     }
 
     async function loadDashboard() {
@@ -693,17 +935,19 @@
     }
 
     async function loadInvestments() {
-        const [accounts, tx] = await Promise.all([
+        const [accounts, tx, history] = await Promise.all([
             api('/api/accounts'),
             api('/api/transactions?period=month&anchor=' + state.anchor + '&per_page=20'),
+            api('/api/investment-balance-history'),
         ]);
-        const investments = accounts.filter(a => ['savings', 'deposit', 'investment'].includes(a.account_type) && a.is_active);
-        const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', investment: 'Инвестиционный' };
-        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${money(account.balance)}</strong><div class="account-meta"><span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span></div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить ставку</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный или инвестиционный счёт в настройках</div>';
+        const investments = accounts.filter(a => ['savings', 'deposit', 'currency', 'investment'].includes(a.account_type) && a.is_active);
+        const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', currency: 'Валютный', investment: 'Инвестиционный' };
+        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${account.account_type === 'currency' ? nativeMoney(account.balance, account.currency_code) : money(account.balance)}</strong><div class="account-meta">${account.account_type === 'currency' ? `<span>В основной валюте: ${money(account.base_equivalent)}</span><span>Курс: ${Number(account.exchange_rate).toFixed(4)}</span>` : `<span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span>`}</div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить счёт</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный, валютный или инвестиционный счёт в настройках</div>';
         $('#investmentTransactions').innerHTML = tx.items.filter(item => ['transfer', 'interest'].includes(item.tx_type)).map(transactionRow).join('') || '<div class="empty-state">Пополнений пока нет</div>';
         $$('[data-configure-interest]').forEach(button => button.addEventListener('click', () => {
             openAccountForm(accounts.find(account => account.id === Number(button.dataset.configureInterest)));
         }));
+        drawLineChart($('#investmentProjection'), history, ['invested']);
         setupInvestmentCalculator(investments.find(a => a.account_type === 'investment') || investments[0]);
     }
 
@@ -720,13 +964,10 @@
             const rate = annual / 12;
             const months = years * 12;
             let value = principal;
-            const series = [];
             for (let i = 0; i <= months; i++) {
                 if (i > 0) value = value * (1 + rate) + monthly;
-                if (i % Math.max(1, Math.round(months / 24)) === 0 || i === months) series.push({ label: `${i} мес`, income: value, expense: 0 });
             }
             $('#futureValue').textContent = money(value);
-            drawLineChart($('#investmentProjection'), series, ['income', 'expense', null]);
         };
         form.addEventListener('input', calculate);
         calculate();

@@ -13,6 +13,7 @@ class Config:
     SEED_DEMO = os.getenv("SEED_DEMO", "0") == "1"
     TESTING = False
     LOGIN_DISABLED = False
+    PROVERKACHEKA_TOKEN = os.getenv("PROVERKACHEKA_TOKEN", "").strip()
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = (

@@ -162,6 +162,25 @@ CREATE TABLE IF NOT EXISTS imported_transactions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS receipt_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fingerprint TEXT NOT NULL UNIQUE,
+    transaction_ids TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'proverkacheka',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS receipt_product_categories (
+    normalized_name TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    times_used INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipt_product_category
+ON receipt_product_categories(category_id);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     action TEXT NOT NULL,
@@ -251,6 +270,8 @@ def init_db(seed_demo: bool = True) -> None:
         ("Страхование", "expense", "insurance", "#38bdf8", None, 0),
         ("Хобби", "expense", "hobby", "#a78bfa", None, 0),
         ("Благотворительность", "expense", "charity", "#fb7185", None, 0),
+        ("Алкоголь", "expense", "cafe", "#c084fc", None, 0),
+        ("Приколюхи", "expense", "hobby", "#f472b6", None, 0),
     ]
     db.executemany(
         "INSERT OR IGNORE INTO categories(name, type, icon, color, parent_id, is_custom) VALUES (?, ?, ?, ?, ?, ?)",
