@@ -14,6 +14,7 @@ from ..auth import current_user, current_user_id
 from ..db import get_db
 from ..errors import NotFoundError
 from ..receipt_service import fetch_receipt, normalise_product_name, parse_receipt_qr
+from ..push_service import notify_transaction_created
 from ..services import (
     accrue_interest,
     capital_history_series,
@@ -254,6 +255,7 @@ def duplicate_transaction(tx_id: int):
         project_id=row["project_id"],
         actor_user_id=current_user_id(),
     )
+    notify_transaction_created(transaction_id, current_user_id())
     return ok({"id": transaction_id}, 201)
 
 
@@ -308,6 +310,7 @@ def create_transaction():
         target_amount=target_amount,
         project_id=project_id,
     )
+    notify_transaction_created(transaction_id, current_user_id())
     return ok({"id": transaction_id}, 201)
 
 
@@ -403,6 +406,9 @@ def import_receipt():
     except Exception:
         db.rollback()
         raise
+    actor_user_id = current_user_id()
+    for transaction_id in transaction_ids:
+        notify_transaction_created(transaction_id, actor_user_id)
     return ok({"transaction_ids": transaction_ids, "count": len(transaction_ids)}, 201)
 
 
@@ -827,6 +833,7 @@ def apply_recurring_transaction(item_id: int):
     )
     db.execute("UPDATE recurring_transactions SET next_date = ? WHERE id = ?", (_next_recurrence_date(row["next_date"], row["frequency"]), item_id))
     db.commit()
+    notify_transaction_created(transaction_id, current_user_id())
     return ok({"id": transaction_id})
 
 

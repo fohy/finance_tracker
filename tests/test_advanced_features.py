@@ -85,3 +85,23 @@ def test_push_config_reports_missing_server_keys(client):
     assert response.get_json()["data"] == {
         "configured": False, "public_key": "", "subscribed": False,
     }
+
+
+def test_transaction_push_contains_person_and_purpose(app, client, csrf_headers, monkeypatch):
+    payload = _expense_payload(client, 2390)
+    response = client.post("/api/transactions", headers=csrf_headers, json=payload)
+    transaction_id = response.get_json()["data"]["id"]
+    captured = []
+
+    with app.app_context():
+        app.config.update(VAPID_PUBLIC_KEY="public", VAPID_PRIVATE_KEY="private")
+        monkeypatch.setattr("finance.push_service._send_events", lambda events: captured.extend(events) or {
+            "sent": 1, "skipped": 0, "removed": 0, "errors": 0,
+        })
+        from finance.push_service import notify_transaction_created
+
+        notify_transaction_created(transaction_id, 1)
+
+    assert "Расход 2 390,00" in captured[0]["title"]
+    assert "Тестовый расход" in captured[0]["body"]
+    assert captured[0]["url"] == "/transactions"
