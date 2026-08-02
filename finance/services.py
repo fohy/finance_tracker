@@ -592,3 +592,100 @@ def category_budget_status(anchor: str | None = None) -> list[dict[str, Any]]:
         item["status"] = "over" if item["progress"] > 100 else "warning" if item["progress"] >= 80 else "ok"
         result.append(item)
     return result
+
+
+def visual_analytics(period: str, anchor: str | None, person_id: int | None) -> dict[str, Any]:
+    """Return compact datasets used by the optional visual analytics widgets."""
+    db = get_db()
+    start, end = period_bounds(period, anchor)
+    person_sql = " AND t.person_id = ?" if person_id else ""
+    params: list[Any] = [start.isoformat(), end.isoformat()]
+    if person_id:
+        params.append(person_id)
+
+    totals = db.execute(
+        f"""SELECT
+               COALESCE(SUM(CASE WHEN t.tx_type IN ('income', 'interest') THEN t.amount ELSE 0 END), 0) income,
+               COALESCE(SUM(CASE WHEN t.tx_type = 'expense' THEN t.amount ELSE 0 END), 0) expense,
+               COALESCE(SUM(CASE WHEN t.tx_type = 'transfer' AND ta.kind = 'investment' THEN t.amount ELSE 0 END), 0) invested
+            FROM transactions t LEFT JOIN accounts ta ON ta.id = t.target_account_id
+            WHERE t.tx_date BETWEEN ? AND ?{person_sql}""",
+        params,
+    ).fetchone()
+    categories = db.execute(
+        f"""SELECT COALESCE(c.name, 'Без категории') label, ROUND(SUM(t.amount), 2) amount,
+                   COALESCE(c.color, '#86aa9a') color
+            FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+            WHERE t.tx_type = 'expense' AND t.tx_date BETWEEN ? AND ?{person_sql}
+            GROUP BY c.id, c.name, c.color ORDER BY amount DESC""",
+        params,
+    ).fetchall()
+    top = [dict(row) for row in categories[:6]]
+    other_amount = round(sum(float(row["amount"]) for row in categories[6:]), 2)
+    if other_amount:
+        top.append({"label": "Остальное", "amount": other_amount, "color": "#74847c"})
+    income = round(float(totals["income"]), 2)
+    expense = round(float(totals["expense"]), 2)
+    invested = round(float(totals["invested"]), 2)
+
+    heatmap_start = end - timedelta(days=83)
+    heatmap_params: list[Any] = [heatmap_start.isoformat(), end.isoformat()]
+    if person_id:
+        heatmap_params.append(person_id)
+    heatmap_rows = db.execute(
+        f"""SELECT t.tx_date date, ROUND(SUM(t.amount), 2) amount
+            FROM transactions t WHERE t.tx_type = 'expense'
+              AND t.tx_date BETWEEN ? AND ?{person_sql}
+            GROUP BY t.tx_date ORDER BY t.tx_date""",
+        heatmap_params,
+    ).fetchall()
+
+    accounts = db.execute(
+        "SELECT id, name, account_type, currency_code, balance FROM accounts WHERE is_active = 1 ORDER BY id"
+    ).fetchall()
+    account_series = []
+    cutoff = end - timedelta(days=44)
+    for account in accounts:
+        rows = db.execute(
+            """SELECT tx_date, SUM(delta) delta FROM (
+                   SELECT tx_date, CASE
+                       WHEN tx_type IN ('income', 'interest') THEN amount
+                       WHEN tx_type IN ('expense', 'transfer') THEN -amount ELSE 0 END delta
+                   FROM transactions WHERE account_id = ?
+                   UNION ALL
+                   SELECT tx_date, COALESCE(target_amount, amount) delta
+                   FROM transactions WHERE tx_type = 'transfer' AND target_account_id = ?
+               ) GROUP BY tx_date ORDER BY tx_date""",
+            (account["id"], account["id"]),
+        ).fetchall()
+        opening = float(account["balance"]) - sum(float(row["delta"] or 0) for row in rows)
+        running = opening
+        points = []
+        for row in rows:
+            if row["tx_date"] < cutoff.isoformat():
+                running += float(row["delta"] or 0)
+                continue
+            if not points:
+                points.append({"label": cutoff.isoformat(), "balance": round(running, 2)})
+            if row["tx_date"] > end.isoformat():
+                break
+            running += float(row["delta"] or 0)
+            points.append({"label": row["tx_date"], "balance": round(running, 2)})
+        if not points:
+            points.append({"label": cutoff.isoformat(), "balance": round(running, 2)})
+        if points[-1]["label"] < end.isoformat():
+            points.append({"label": end.isoformat(), "balance": round(running, 2)})
+        account_series.append({
+            "id": account["id"], "name": account["name"], "account_type": account["account_type"],
+            "currency_code": account["currency_code"], "points": points,
+        })
+
+    return {
+        "flow": {"income": income, "expense": expense, "invested": invested, "categories": top},
+        "heatmap": [dict(row) for row in heatmap_rows],
+        "waterfall": {
+            "income": income, "categories": top,
+            "remainder": round(income - expense, 2),
+        },
+        "account_series": account_series,
+    }

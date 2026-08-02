@@ -34,6 +34,24 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS push_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(subscription_id, event_key)
+);
+
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -68,6 +86,15 @@ CREATE TABLE IF NOT EXISTS account_rate_history (
     UNIQUE(account_id, effective_date)
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    color TEXT NOT NULL DEFAULT '#86aa9a',
+    icon TEXT NOT NULL DEFAULT 'briefcase',
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tx_type TEXT NOT NULL CHECK(tx_type IN ('income', 'expense', 'transfer', 'interest')),
@@ -79,6 +106,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     target_account_id INTEGER REFERENCES accounts(id) ON DELETE RESTRICT,
     note TEXT NOT NULL DEFAULT '',
     target_amount REAL,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -187,6 +215,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     entity_type TEXT NOT NULL,
     entity_id INTEGER NOT NULL,
     details TEXT NOT NULL DEFAULT '',
+    actor_user_id INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -199,6 +228,8 @@ CREATE INDEX IF NOT EXISTS idx_recurring_next_date ON recurring_transactions(nex
 CREATE INDEX IF NOT EXISTS idx_category_rules_priority ON category_rules(is_active, priority, id);
 CREATE INDEX IF NOT EXISTS idx_import_batches_created ON import_batches(created_at);
 CREATE INDEX IF NOT EXISTS idx_account_rate_history_date ON account_rate_history(account_id, effective_date);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_created ON push_deliveries(created_at);
 """
 
 
@@ -337,6 +368,9 @@ def _apply_compatible_schema_changes(db: sqlite3.Connection) -> None:
     if "target_amount" not in transaction_columns:
         db.execute("ALTER TABLE transactions ADD COLUMN target_amount REAL")
         db.execute("UPDATE transactions SET target_amount = amount WHERE tx_type = 'transfer'")
+    if "project_id" not in transaction_columns:
+        db.execute("ALTER TABLE transactions ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_transactions_project ON transactions(project_id)")
 
     goal_columns = {row["name"] for row in db.execute("PRAGMA table_info(goals)")}
     if "account_id" not in goal_columns:

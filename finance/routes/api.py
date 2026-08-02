@@ -10,7 +10,7 @@ from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from ..auth import current_user_id
+from ..auth import current_user, current_user_id
 from ..db import get_db
 from ..errors import NotFoundError
 from ..receipt_service import fetch_receipt, normalise_product_name, parse_receipt_qr
@@ -27,6 +27,7 @@ from ..services import (
     shift_period,
     spending_statistics,
     trend_series,
+    visual_analytics,
 )
 from ..transaction_service import create_transaction as create_transaction_record
 from ..transaction_service import delete_transaction as delete_transaction_record
@@ -122,6 +123,8 @@ def bootstrap():
     return ok({
         "people": [dict(r) for r in db.execute("SELECT * FROM people ORDER BY id")],
         "categories": [dict(r) for r in db.execute("SELECT * FROM categories ORDER BY type, name")],
+        "projects": [dict(r) for r in db.execute("SELECT * FROM projects ORDER BY status, name COLLATE NOCASE")],
+        "user": current_user(),
         "accounts": [account_dict(r) for r in db.execute(
             "SELECT * FROM accounts WHERE is_active = 1 ORDER BY account_type, name"
         )],
@@ -142,6 +145,14 @@ def summary():
     data["prev_anchor"] = shift_period(period, anchor, -1)
     data["next_anchor"] = shift_period(period, anchor, 1)
     return ok(data)
+
+
+@api_bp.get("/visual-data")
+def visual_data():
+    return ok(visual_analytics(
+        request.args.get("period", "month"), request.args.get("anchor"),
+        as_int_or_none(request.args.get("person_id")),
+    ))
 
 
 @api_bp.get("/transactions")
@@ -175,6 +186,10 @@ def list_transactions():
     if category_id:
         filters.append("t.category_id = ?")
         params.append(category_id)
+    project_id = as_int_or_none(request.args.get("project_id"))
+    if project_id:
+        filters.append("t.project_id = ?")
+        params.append(project_id)
     search = str(request.args.get("q") or "").strip()
     if search:
         filters.append("(t.note LIKE ? OR c.name LIKE ?)")
@@ -185,10 +200,12 @@ def list_transactions():
     rows = db.execute(
         f"""SELECT t.*, c.name category_name, c.icon category_icon, c.color category_color,
                    p.name person_name, p.avatar_color,
+                   pr.name project_name, pr.color project_color,
                    a.name account_name, ta.name target_account_name
             FROM transactions t
             LEFT JOIN categories c ON c.id=t.category_id
             LEFT JOIN people p ON p.id=t.person_id
+            LEFT JOIN projects pr ON pr.id=t.project_id
             LEFT JOIN accounts a ON a.id=t.account_id
             LEFT JOIN accounts ta ON ta.id=t.target_account_id
             WHERE {where}
@@ -215,6 +232,8 @@ def update_transaction(tx_id: int):
         note=data.get("note"),
         person_id=as_int_or_none(data.get("person_id")) if "person_id" in data else None,
         category_id=as_int_or_none(data.get("category_id")) if "category_id" in data else None,
+        project_id=as_int_or_none(data.get("project_id")) if "project_id" in data else None,
+        update_project="project_id" in data,
         actor_user_id=current_user_id(),
     )
     return ok()
@@ -232,6 +251,7 @@ def duplicate_transaction(tx_id: int):
         account_id=row["account_id"], target_account_id=row["target_account_id"],
         category_id=row["category_id"], person_id=row["person_id"], note=row["note"],
         target_amount=row["target_amount"],
+        project_id=row["project_id"],
         actor_user_id=current_user_id(),
     )
     return ok({"id": transaction_id}, 201)
@@ -243,10 +263,11 @@ def export_transactions():
     start, end = period_bounds(period, request.args.get("anchor"))
     rows = get_db().execute(
         """SELECT t.tx_date, t.tx_type, t.amount, c.name category, p.name person,
-                   a.name account, ta.name target_account, t.note
+                   a.name account, ta.name target_account, pr.name project, t.note
            FROM transactions t
            LEFT JOIN categories c ON c.id = t.category_id
            LEFT JOIN people p ON p.id = t.person_id
+           LEFT JOIN projects pr ON pr.id = t.project_id
            JOIN accounts a ON a.id = t.account_id
            LEFT JOIN accounts ta ON ta.id = t.target_account_id
            WHERE t.tx_date BETWEEN ? AND ? ORDER BY t.tx_date, t.id""",
@@ -254,7 +275,7 @@ def export_transactions():
     ).fetchall()
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Дата", "Тип", "Сумма", "Категория", "Участник", "Счёт", "Счёт назначения", "Заметка"])
+    writer.writerow(["Дата", "Тип", "Сумма", "Категория", "Участник", "Счёт", "Счёт назначения", "Проект", "Заметка"])
     writer.writerows([list(row) for row in rows])
     return Response("\ufeff" + output.getvalue(), mimetype="text/csv", headers={
         "Content-Disposition": "attachment; filename=finflow-transactions.csv"
@@ -276,6 +297,7 @@ def create_transaction():
     target_account_id = as_int_or_none(data.get("target_account_id"))
     category_id = as_int_or_none(data.get("category_id"))
     person_id = as_int_or_none(data.get("person_id"))
+    project_id = as_int_or_none(data.get("project_id"))
     note = str(data.get("note") or "").strip()
     target_amount = as_float(data.get("target_amount"), "Сумма зачисления") if data.get("target_amount") not in (None, "") else None
 
@@ -284,6 +306,7 @@ def create_transaction():
         target_account_id=target_account_id, category_id=category_id,
         person_id=person_id, note=note, actor_user_id=current_user_id(),
         target_amount=target_amount,
+        project_id=project_id,
     )
     return ok({"id": transaction_id}, 201)
 

@@ -9,6 +9,7 @@
         bootstrap: null,
         txPage: 1,
         lastFocused: null,
+        freshTransactionId: null,
     };
 
     const $ = (selector, root = document) => root.querySelector(selector);
@@ -21,7 +22,8 @@
         'education', 'subscriptions', 'aid', 'travel', 'home-care', 'beauty',
         'internet', 'alert', 'car', 'fitness', 'children', 'pets', 'devices',
         'repair', 'taxes', 'insurance', 'hobby', 'charity', 'transactions',
-        'trend', 'interest', 'edit', 'copy', 'trash', 'close', 'target',
+        'trend', 'interest', 'edit', 'copy', 'trash', 'close', 'target', 'repeat',
+        'briefcase', 'alert', 'menu',
         'account-checking', 'account-cash', 'account-savings', 'account-deposit',
         'account-currency', 'account-investment',
     ]);
@@ -208,36 +210,83 @@
 
     function setupTheme() {
         const media = window.matchMedia('(prefers-color-scheme: dark)');
-        const storedTheme = () => {
+        const themes = {
+            green: { label: 'Тёмно-зелёная', color: '#20231f' },
+            graphite: { label: 'Графитовая', color: '#1d2024' },
+            warm: { label: 'Тёплая светлая', color: '#f5f1e8' },
+            system: { label: 'Системная', color: 'linear-gradient(135deg, #20231f 50%, #f5f1e8 50%)' },
+        };
+        const storedMode = () => {
             try {
                 const value = localStorage.getItem(themeStorageKey);
-                return value === 'light' || value === 'dark' ? value : null;
+                if (value === 'dark') return 'green';
+                if (value === 'light') return 'warm';
+                return themes[value] ? value : 'system';
             } catch (error) {
-                return null;
+                return 'system';
             }
         };
-        const applyTheme = theme => {
+        let mode = storedMode();
+        const effectiveTheme = value => value === 'system' ? (media.matches ? 'green' : 'warm') : value;
+        const popover = document.createElement('div');
+        popover.className = 'theme-popover';
+        popover.hidden = true;
+        popover.setAttribute('role', 'menu');
+        popover.setAttribute('aria-label', 'Тема оформления');
+        popover.innerHTML = Object.entries(themes).map(([value, item]) => `<button type="button" role="menuitemradio" data-theme-choice="${value}" aria-checked="false"><i style="--theme-swatch:${item.color}"></i><span>${item.label}</span></button>`).join('');
+        document.body.appendChild(popover);
+        let activeThemeButton = null;
+        const closeThemeMenu = () => {
+            popover.hidden = true;
+            $$('[data-theme-toggle]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+        };
+        const applyTheme = value => {
+            mode = value;
+            const theme = effectiveTheme(value);
             document.documentElement.dataset.theme = theme;
-            document.documentElement.style.colorScheme = theme;
+            document.documentElement.dataset.themeMode = value;
+            document.documentElement.style.colorScheme = theme === 'warm' ? 'light' : 'dark';
             document.querySelector('meta[name="theme-color"]')?.setAttribute(
-                'content', theme === 'dark' ? '#20231f' : '#f5f1e8'
+                'content', themes[theme].color
             );
             $$('[data-theme-toggle]').forEach(button => {
-                const label = theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему';
+                const label = `Тема: ${themes[value].label}`;
                 button.setAttribute('aria-label', label);
                 button.setAttribute('title', label);
-                button.setAttribute('aria-pressed', String(theme === 'dark'));
+                button.setAttribute('aria-haspopup', 'menu');
+                button.setAttribute('aria-expanded', 'false');
             });
+            $$('[data-theme-choice]', popover).forEach(button => button.setAttribute('aria-checked', String(button.dataset.themeChoice === value)));
         };
 
-        applyTheme(storedTheme() || (media.matches ? 'dark' : 'light'));
-        $$('[data-theme-toggle]').forEach(button => button.addEventListener('click', () => {
-            const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-            try { localStorage.setItem(themeStorageKey, nextTheme); } catch (error) { /* noop */ }
-            applyTheme(nextTheme);
+        applyTheme(mode);
+        try { localStorage.setItem(themeStorageKey, mode); } catch (error) { /* noop */ }
+        $$('[data-theme-toggle]').forEach(button => button.addEventListener('click', event => {
+            event.stopPropagation();
+            if (!popover.hidden) { closeThemeMenu(); return; }
+            const rect = button.getBoundingClientRect();
+            activeThemeButton = button;
+            popover.hidden = false;
+            popover.style.top = `${Math.min(window.innerHeight - popover.offsetHeight - 8, rect.bottom + 8)}px`;
+            popover.style.left = `${Math.max(8, Math.min(window.innerWidth - popover.offsetWidth - 8, rect.right - popover.offsetWidth))}px`;
+            button.setAttribute('aria-expanded', 'true');
+            $(`[data-theme-choice="${mode}"]`, popover)?.focus();
         }));
+        $$('[data-theme-choice]', popover).forEach(button => button.addEventListener('click', () => {
+            const value = button.dataset.themeChoice;
+            try { localStorage.setItem(themeStorageKey, value); } catch (error) { /* noop */ }
+            applyTheme(value);
+            closeThemeMenu();
+            activeThemeButton?.focus();
+        }));
+        document.addEventListener('pointerdown', event => {
+            if (!popover.hidden && !popover.contains(event.target) && !event.target.closest('[data-theme-toggle]')) closeThemeMenu();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !popover.hidden) { closeThemeMenu(); activeThemeButton?.focus(); }
+        });
         media.addEventListener?.('change', event => {
-            if (!storedTheme()) applyTheme(event.matches ? 'dark' : 'light');
+            if (mode === 'system') applyTheme('system');
         });
     }
 
@@ -261,6 +310,30 @@
         const prefix = sign && number > 0 ? '+' : '';
         const currency = state.bootstrap?.settings?.currency || '₽';
         return `${prefix}${new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number)} ${currency}`;
+    }
+
+    function setAnimatedMoney(id, value, sign = false) {
+        const node = document.getElementById(id);
+        if (!node) return;
+        const target = Number(value || 0);
+        const start = Number(node.dataset.numericValue || 0);
+        node.dataset.numericValue = String(target);
+        node._countAnimation && cancelAnimationFrame(node._countAnimation);
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || start === target) {
+            node.textContent = money(target, sign);
+            return;
+        }
+        const started = performance.now();
+        const duration = 520;
+        node.classList.add('is-counting');
+        const tick = now => {
+            const progress = Math.min(1, (now - started) / duration);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            node.textContent = money(start + (target - start) * eased, sign);
+            if (progress < 1) node._countAnimation = requestAnimationFrame(tick);
+            else node.classList.remove('is-counting');
+        };
+        node._countAnimation = requestAnimationFrame(tick);
     }
 
     function nativeMoney(value, code) {
@@ -332,6 +405,13 @@
             .map(a => `<option value="${a.id}">${escapeHtml(a.name)} · ${a.account_type === 'currency' ? nativeMoney(a.balance, a.currency_code) : money(a.balance)}</option>`).join('');
     }
 
+    function projectOptions(includeAll = false, selectedId = '') {
+        const head = `<option value="">${includeAll ? 'Все проекты' : 'Без проекта'}</option>`;
+        return head + (state.bootstrap.projects || [])
+            .filter(project => project.status === 'active' || String(project.id) === String(selectedId))
+            .map(project => `<option value="${project.id}">${escapeHtml(project.name)}</option>`).join('');
+    }
+
     function categoryOptions(type, includeAutomatic = false) {
         const automatic = includeAutomatic ? '<option value="">Определить автоматически</option>' : '';
         return automatic + state.bootstrap.categories
@@ -346,7 +426,9 @@
         form.person_id.innerHTML = personOptions(false);
         form.account_id.innerHTML = accountOptions(null, false);
         form.target_account_id.innerHTML = accountOptions();
+        form.project_id.innerHTML = projectOptions(false);
         const targetAmountField = $('#targetAmountField');
+        const projectField = $('#projectField');
         const amountCurrency = $('#amountCurrency');
         const receiptScan = $('#receiptScan');
         const syncTargetAmount = () => {
@@ -373,6 +455,9 @@
             const categoryField = $('#categoryField');
             const targetField = $('#targetAccountField');
             receiptScan?.classList.toggle('hidden', type !== 'expense');
+            projectField?.classList.toggle('hidden', type !== 'expense');
+            form.project_id.disabled = type !== 'expense';
+            if (type !== 'expense') form.project_id.value = '';
             if (type === 'transfer') {
                 categoryField.classList.add('hidden');
                 targetField.classList.remove('hidden');
@@ -437,15 +522,31 @@
                 return;
             }
             const data = Object.fromEntries(new FormData(form).entries());
+            const saveButton = $('#saveTransactionBtn');
+            const originalLabel = saveButton?.textContent;
             try {
-                await api('/api/transactions', { method: 'POST', body: data });
+                if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Сохраняем…'; }
+                const created = await api('/api/transactions', { method: 'POST', body: data });
+                state.freshTransactionId = created?.id || null;
+                if (saveButton) { saveButton.classList.add('is-success'); saveButton.textContent = 'Готово'; }
                 toast('Операция сохранена');
+                if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    await new Promise(resolve => window.setTimeout(resolve, 260));
+                }
                 closeModals();
                 form.reset();
                 form.tx_date.value = state.bootstrap.today;
+                setType('expense');
                 await refreshBootstrap();
                 await loadCurrentPage();
             } catch (error) { toast(error.message, 'error'); }
+            finally {
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.classList.remove('is-success');
+                    saveButton.textContent = originalLabel;
+                }
+            }
         });
     }
 
@@ -749,7 +850,7 @@
         const icon = item.category_icon || ({ transfer: 'trend', interest: 'interest' }[item.tx_type] || 'category');
         const title = item.category_name || names[item.tx_type];
         const amountPrefix = item.tx_type === 'income' || item.tx_type === 'interest' ? '+' : item.tx_type === 'expense' ? '−' : '';
-        return `<div class="transaction-row">
+        return `<div class="transaction-row ${Number(item.id) === Number(state.freshTransactionId) ? 'is-fresh' : ''}">
             <div class="tx-icon" style="color:${escapeHtml(item.category_color || '#8eb49b')}">${iconSvg(icon)}</div>
             <div class="tx-main"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(item.person_name || 'Общее')} · ${formatDate(item.tx_date)}${item.note ? ` · ${escapeHtml(item.note)}` : ''}</span></div>
             <div class="tx-amount ${item.tx_type}">${amountPrefix}${money(item.amount)}</div>
@@ -892,11 +993,12 @@
             api(`/api/budgets?anchor=${state.anchor}`),
         ]);
         setPeriodLabel(data);
-        $('#lifeBalance').textContent = money(data.life_balance);
-        $('#investmentBalance').textContent = money(data.invested_balance);
-        $('#totalCapital').textContent = money(data.total_capital);
+        setAnimatedMoney('lifeBalance', data.life_balance);
+        setAnimatedMoney('investmentBalance', data.invested_balance);
+        setAnimatedMoney('totalCapital', data.total_capital);
         renderBudgets(budgets, $('#budgetOverview'));
         $('#recentTransactions').innerHTML = tx.items.length ? tx.items.map(transactionRow).join('') : '<div class="empty-state">Операций за период нет</div>';
+        state.freshTransactionId = null;
     }
 
     function pluralize(value, forms) {
@@ -952,6 +1054,8 @@
         if (state.personId) query.set('person_id', state.personId);
         const type = $('#txTypeFilter')?.value;
         if (type) query.set('type', type);
+        const projectId = $('#txProjectFilter')?.value;
+        if (projectId) query.set('project_id', projectId);
         const search = $('#txSearch')?.value.trim();
         if (search) query.set('q', search);
         const exportLink = $('#exportTransactions');
@@ -964,19 +1068,21 @@
             const prefix = ['income', 'interest'].includes(item.tx_type) ? '+' : item.tx_type === 'expense' ? '−' : '';
             const categoryIcon = item.category_icon || (item.tx_type === 'interest' ? 'interest' : item.tx_type === 'transfer' ? 'trend' : 'category');
             const categoryName = item.category_name || (item.tx_type === 'transfer' ? 'Между счетами' : item.tx_type === 'interest' ? 'Начисление' : 'Без категории');
-            return `<tr>
+            return `<tr class="${Number(item.id) === Number(state.freshTransactionId) ? 'is-fresh' : ''}">
                 <td data-label="Дата">${formatDate(item.tx_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
-                <td data-label="Операция"><div class="table-main"><div class="tx-icon">${iconSvg(categoryIcon)}</div><div><strong>${escapeHtml(categoryName)}</strong><div class="subtext">${names[item.tx_type]}</div></div></div></td>
+                <td data-label="Операция"><div class="table-main"><div class="tx-icon">${iconSvg(categoryIcon)}</div><div><strong>${escapeHtml(categoryName)}</strong><div class="subtext">${names[item.tx_type]}</div>${item.project_name ? `<span class="project-chip" style="--project-color:${escapeHtml(item.project_color || '#82c79d')}">${iconSvg('briefcase')}${escapeHtml(item.project_name)}</span>` : ''}</div></div></td>
                 <td data-label="Заметка"><span>${escapeHtml(item.note || 'Без пометки')}</span></td>
                 <td data-label="Человек">${item.person_name ? `<span class="person-pill" style="--avatar:${escapeHtml(item.avatar_color)}"><i>${escapeHtml(item.person_name[0])}</i>${escapeHtml(item.person_name)}</span>` : '—'}</td>
                 <td data-label="Счёт">${escapeHtml(item.account_name || '—')}${item.target_account_name ? `<div class="subtext">Счёт назначения: ${escapeHtml(item.target_account_name)}</div>` : ''}</td>
                 <td data-label="Сумма" class="align-right"><strong class="tx-amount ${item.tx_type}">${prefix}${money(item.amount)}</strong></td>
-                <td class="row-actions">${item.tx_type !== 'interest' ? `<button class="delete-btn" data-edit-tx="${item.id}" data-date="${item.tx_date}" data-amount="${Number(item.amount)}" data-note="${escapeHtml(item.note || '')}" title="Исправить сумму, заметку или дату" aria-label="Исправить операцию">${iconSvg('edit')}</button><button class="delete-btn" data-duplicate-tx="${item.id}" title="Дублировать" aria-label="Дублировать операцию">${iconSvg('copy')}</button><button class="delete-btn" data-delete-tx="${item.id}" title="Удалить" aria-label="Удалить операцию">${iconSvg('trash')}</button>` : ''}</td>
+                <td class="row-actions"><button class="delete-btn" data-history-tx="${item.id}" title="История изменений" aria-label="История изменений">${iconSvg('repeat')}</button>${item.tx_type !== 'interest' ? `<button class="delete-btn" data-edit-tx="${item.id}" data-date="${item.tx_date}" data-amount="${Number(item.amount)}" data-note="${escapeHtml(item.note || '')}" data-project="${item.project_id || ''}" data-type="${item.tx_type}" title="Исправить операцию" aria-label="Исправить операцию">${iconSvg('edit')}</button><button class="delete-btn" data-duplicate-tx="${item.id}" title="Дублировать" aria-label="Дублировать операцию">${iconSvg('copy')}</button><button class="delete-btn" data-delete-tx="${item.id}" title="Удалить" aria-label="Удалить операцию">${iconSvg('trash')}</button>` : ''}</td>
             </tr>`;
         }).join('') : '<tr><td colspan="7"><div class="empty-state">За этот период операций нет</div></td></tr>';
         $$('[data-delete-tx]').forEach(btn => btn.addEventListener('click', () => deleteTransaction(btn.dataset.deleteTx)));
         $$('[data-duplicate-tx]').forEach(btn => btn.addEventListener('click', () => duplicateTransaction(btn.dataset.duplicateTx)));
-        $$('[data-edit-tx]').forEach(btn => btn.addEventListener('click', () => editTransaction(btn.dataset.editTx, btn.dataset.date, btn.dataset.amount, btn.dataset.note)));
+        $$('[data-edit-tx]').forEach(btn => btn.addEventListener('click', () => editTransaction(btn.dataset.editTx, btn.dataset.date, btn.dataset.amount, btn.dataset.note, btn.dataset.project, btn.dataset.type)));
+        $$('[data-history-tx]').forEach(btn => btn.addEventListener('click', () => openTransactionHistory(btn.dataset.historyTx)));
+        state.freshTransactionId = null;
         renderPagination(data);
     }
 
@@ -1002,8 +1108,60 @@
         catch (error) { toast(error.message, 'error'); }
     }
 
-    function editTransaction(id, txDate, amount, note) {
-        openEntityForm('Исправить операцию', `<label>Дата<input name="tx_date" type="date" value="${escapeHtml(txDate)}" required></label><label>Сумма<input name="amount" type="number" min="0.01" step="0.01" value="${escapeHtml(amount)}" required></label><label>Заметка<textarea name="note">${escapeHtml(note)}</textarea></label>`, async data => { try { await api(`/api/transactions/${id}`, { method: 'PATCH', body: data }); toast('Операция обновлена'); closeModals(); await refreshBootstrap(); loadTransactions(); } catch (error) { toast(error.message, 'error'); } });
+    function formatDateTime(value) {
+        if (!value) return '—';
+        return new Date(value).toLocaleString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function auditValue(field, value) {
+        if (value === null || value === undefined || value === '') return '—';
+        const lookup = (items, id, fallback) => items?.find(item => Number(item.id) === Number(id))?.name || fallback;
+        if (field === 'category_id') return lookup(state.bootstrap.categories, value, `Категория #${value}`);
+        if (field === 'person_id') return lookup(state.bootstrap.people, value, `Участник #${value}`);
+        if (field === 'account_id' || field === 'target_account_id') return lookup(state.bootstrap.accounts, value, `Счёт #${value}`);
+        if (field === 'project_id') return lookup(state.bootstrap.projects, value, `Проект #${value}`);
+        if (field === 'tx_type') return ({ income: 'Доход', expense: 'Расход', transfer: 'Перевод', interest: 'Проценты' })[value] || value;
+        if (field.includes('amount')) return money(value);
+        if (field === 'tx_date') return formatDate(value, { day: '2-digit', month: 'long', year: 'numeric' });
+        return String(value);
+    }
+
+    function auditActor(actor) {
+        if (!actor) return 'Система';
+        if (typeof actor === 'object') return actor.name || actor.login || actor.person_name || 'Система';
+        return String(actor);
+    }
+
+    async function openTransactionHistory(id) {
+        openEntityContent('История операции', '<div class="loading-state" role="status">Загружаем историю…</div>');
+        try {
+            const entries = await api(`/api/transactions/${id}/history`);
+            const labels = { amount: 'Сумма', target_amount: 'Сумма зачисления', tx_date: 'Дата', note: 'Пометка', category_id: 'Категория', person_id: 'Участник', account_id: 'Счёт', target_account_id: 'Счёт назначения', project_id: 'Проект', tx_type: 'Тип' };
+            const actionLabels = { created: 'Создано', updated: 'Изменено', deleted: 'Удалено', create: 'Создано', update: 'Изменено', delete: 'Удалено' };
+            const content = entries.length ? entries.map(entry => {
+                const details = entry.details || {};
+                if (details.legacy !== undefined) {
+                    const legacy = typeof details.legacy === 'string' ? details.legacy : JSON.stringify(details.legacy);
+                    return `<article class="audit-entry"><div class="audit-entry__marker"></div><div><div class="audit-entry__head"><strong>${escapeHtml(actionLabels[entry.action] || entry.action || 'Запись')}</strong><span>${escapeHtml(auditActor(entry.actor))} · ${formatDateTime(entry.created_at)}</span></div><p>${escapeHtml(legacy)}</p></div></article>`;
+                }
+                const before = details.before || {};
+                const after = details.after || {};
+                const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+                    .filter(field => labels[field] && JSON.stringify(before[field]) !== JSON.stringify(after[field]));
+                const changes = fields.map(field => `<div class="audit-change"><span>${labels[field]}</span><div>${before[field] !== undefined ? `<del>${escapeHtml(auditValue(field, before[field]))}</del>` : ''}${after[field] !== undefined ? `<b>${escapeHtml(auditValue(field, after[field]))}</b>` : ''}</div></div>`).join('');
+                return `<article class="audit-entry"><div class="audit-entry__marker"></div><div><div class="audit-entry__head"><strong>${escapeHtml(actionLabels[entry.action] || entry.action || 'Изменение')}</strong><span>${escapeHtml(auditActor(entry.actor))} · ${formatDateTime(entry.created_at)}</span></div>${changes || '<p>Состав операции не изменился</p>'}</div></article>`;
+            }).join('') : '<div class="empty-state">История пока пуста</div>';
+            openEntityContent('История операции', `<div class="audit-timeline">${content}</div>`, false);
+        } catch (error) {
+            openEntityContent('История операции', `<div class="empty-state">${escapeHtml(error.message)}</div>`, false);
+        }
+    }
+
+    function editTransaction(id, txDate, amount, note, projectId = '', txType = '') {
+        const projectField = txType === 'expense' ? `<label>Проект<select name="project_id">${projectOptions(false, projectId)}</select></label>` : '';
+        openEntityForm('Исправить операцию', `<label>Дата<input name="tx_date" type="date" value="${escapeHtml(txDate)}" required></label><label>Сумма<input name="amount" type="number" min="0.01" step="0.01" value="${escapeHtml(amount)}" required></label>${projectField}<label>Заметка<textarea name="note">${escapeHtml(note)}</textarea></label>`, async data => { try { await api(`/api/transactions/${id}`, { method: 'PATCH', body: data }); toast('Операция обновлена'); closeModals(); await refreshBootstrap(); loadTransactions(); } catch (error) { toast(error.message, 'error'); } });
+        const select = $('#entityForm [name="project_id"]');
+        if (select) { select.value = projectId; select.dispatchEvent(new Event('change', { bubbles: true })); }
     }
 
     function layoutEntityFormFields(container) {
@@ -1028,6 +1186,16 @@
         openModal('entityModal');
     }
 
+    function openEntityContent(title, body, shouldOpen = true) {
+        const container = $('#entityModalContent');
+        container.setAttribute('aria-labelledby', 'entityModalTitle');
+        container.classList.add('entity-modal-card');
+        container.innerHTML = `<div class="modal-head entity-modal__header"><h2 id="entityModalTitle">${escapeHtml(title)}</h2><button class="icon-btn" type="button" data-close-entity aria-label="Закрыть окно">${iconSvg('close')}</button></div><div class="entity-content">${body}</div>`;
+        $('[data-close-entity]', container)?.addEventListener('click', closeModals);
+        if (shouldOpen) openModal('entityModal');
+        else $('[data-close-entity]', container)?.focus({ preventScroll: true });
+    }
+
     function openCategoryForm() {
         openEntityForm('Новая категория', `
             <label>Название<input name="name" required placeholder="Например: питомцы"></label>
@@ -1040,14 +1208,32 @@
         });
     }
 
+    function sparklineSvg(points = [], label = 'Динамика счёта') {
+        if (!points.length) return '<div class="sparkline-empty">Нет истории</div>';
+        const width = 240, height = 50, pad = 4;
+        const values = points.map(point => Number(point.balance || 0));
+        const min = Math.min(...values), max = Math.max(...values);
+        const range = Math.max(1, max - min);
+        const x = index => points.length === 1 ? width / 2 : pad + index * (width - pad * 2) / (points.length - 1);
+        const y = value => pad + (height - pad * 2) * (1 - (value - min) / range);
+        const path = points.length === 1
+            ? `M ${pad} ${y(values[0])} L ${width - pad} ${y(values[0])}`
+            : points.map((point, index) => `${index ? 'L' : 'M'} ${x(index).toFixed(1)} ${y(values[index]).toFixed(1)}`).join(' ');
+        const change = values.at(-1) - values[0];
+        return `<svg class="account-sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)}: ${change >= 0 ? 'рост' : 'снижение'} ${money(Math.abs(change))}"><path d="${path}"/><circle cx="${x(points.length - 1)}" cy="${y(values.at(-1))}" r="3"/></svg>`;
+    }
+
     async function loadInvestments() {
-        const [accounts, tx] = await Promise.all([
+        const visualQuery = new URLSearchParams({ period: state.period, anchor: state.anchor });
+        const [accounts, tx, visualData] = await Promise.all([
             api('/api/accounts'),
             api('/api/transactions?period=month&anchor=' + state.anchor + '&per_page=20'),
+            api(`/api/visual-data?${visualQuery}`),
         ]);
         const investments = accounts.filter(a => ['savings', 'deposit', 'currency', 'investment'].includes(a.account_type) && a.is_active);
         const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', currency: 'Валютный', investment: 'Инвестиционный' };
-        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card ${accountTypeClass(account.account_type)}"><div class="account-card__head"><div class="account-card__icon">${iconSvg(accountTypeIcons[account.account_type] || 'account-checking')}</div><div><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3></div></div><strong>${account.account_type === 'currency' ? nativeMoney(account.balance, account.currency_code) : money(account.balance)}</strong><div class="account-meta">${account.account_type === 'currency' ? `<span>В основной валюте: ${money(account.base_equivalent)}</span><span>Курс: ${Number(account.exchange_rate).toFixed(4)}</span>` : `<span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span>`}</div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить счёт</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный, валютный или инвестиционный счёт в настройках</div>';
+        const series = new Map((visualData.account_series || []).map(item => [Number(item.id), item.points]));
+        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card ${accountTypeClass(account.account_type)}"><div class="account-card__head"><div class="account-card__icon">${iconSvg(accountTypeIcons[account.account_type] || 'account-checking')}</div><div><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3></div></div><strong>${account.account_type === 'currency' ? nativeMoney(account.balance, account.currency_code) : money(account.balance)}</strong><div class="account-card__sparkline">${sparklineSvg(series.get(Number(account.id)) || [], `Динамика счёта ${account.name}`)}</div><div class="account-meta">${account.account_type === 'currency' ? `<span>В основной валюте: ${money(account.base_equivalent)}</span><span>Курс: ${Number(account.exchange_rate).toFixed(4)}</span>` : `<span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span>`}</div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить счёт</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный, валютный или инвестиционный счёт в настройках</div>';
         $('#investmentTransactions').innerHTML = tx.items.filter(item => ['transfer', 'interest'].includes(item.tx_type)).map(transactionRow).join('') || '<div class="empty-state">Пополнений пока нет</div>';
         $$('[data-configure-interest]').forEach(button => button.addEventListener('click', () => {
             openAccountForm(accounts.find(account => account.id === Number(button.dataset.configureInterest)));
@@ -1158,13 +1344,156 @@
         });
     }
 
+    function openProjectForm() {
+        const projectIcons = ['briefcase', 'target', 'travel', 'housing', 'education', 'repair'];
+        openEntityForm('Новый проект', `<label>Название<input name="name" required maxlength="80" placeholder="Например: Ремонт кухни"></label><label>Цвет<input name="color" type="color" value="#82c79d"></label><label>Иконка<select name="icon">${projectIcons.map(icon => `<option value="${icon}">${({ briefcase: 'Проект', target: 'Цель', travel: 'Поездка', housing: 'Дом', education: 'Обучение', repair: 'Ремонт' })[icon]}</option>`).join('')}</select></label>`, async data => {
+            try {
+                await api('/api/projects', { method: 'POST', body: data });
+                toast('Проект создан');
+                closeModals();
+                await refreshBootstrap();
+                loadSettings();
+            } catch (error) { toast(error.message, 'error'); }
+        });
+    }
+
+    function serviceWorkerReady() {
+        return Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, reject) => window.setTimeout(() => reject(new Error('Service worker недоступен')), 4000)),
+        ]);
+    }
+
+    async function renderPushSettings(config) {
+        const card = $('#notificationSettings');
+        const button = $('#pushToggle');
+        const status = $('#pushStatus');
+        const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+        if (!card || !button || !status || !supported) return;
+        card.hidden = false;
+        button._pushConfig = config;
+        if (!config?.configured) {
+            button.disabled = true;
+            button.setAttribute('aria-checked', 'false');
+            status.textContent = 'Не настроено на сервере';
+            return;
+        }
+        try {
+            const registration = await serviceWorkerReady();
+            const subscription = await registration.pushManager.getSubscription();
+            const subscribed = Boolean(subscription);
+            button.disabled = Notification.permission === 'denied';
+            button.setAttribute('aria-checked', String(subscribed));
+            status.textContent = Notification.permission === 'denied' ? 'Уведомления запрещены в браузере' : subscribed ? 'Включены' : 'Выключены';
+        } catch (error) {
+            button.disabled = true;
+            status.textContent = 'Не удалось проверить подписку';
+        }
+        if (button.dataset.ready) return;
+        button.dataset.ready = '1';
+        button.addEventListener('click', async () => {
+            const currentConfig = button._pushConfig;
+            if (!currentConfig?.configured) return;
+            button.disabled = true;
+            try {
+                const registration = await serviceWorkerReady();
+                const current = await registration.pushManager.getSubscription();
+                if (current) {
+                    await api('/api/push/subscriptions', { method: 'DELETE', body: { endpoint: current.endpoint } });
+                    await current.unsubscribe();
+                    button.setAttribute('aria-checked', 'false');
+                    status.textContent = 'Выключены';
+                } else {
+                    const permission = await Notification.requestPermission();
+                    if (permission !== 'granted') throw new Error('Разрешение на уведомления не выдано');
+                    const padding = '='.repeat((4 - currentConfig.public_key.length % 4) % 4);
+                    const raw = atob((currentConfig.public_key + padding).replace(/-/g, '+').replace(/_/g, '/'));
+                    const key = Uint8Array.from(raw, char => char.charCodeAt(0));
+                    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+                    await api('/api/push/subscriptions', { method: 'POST', body: subscription.toJSON() });
+                    button.setAttribute('aria-checked', 'true');
+                    status.textContent = 'Включены';
+                }
+            } catch (error) {
+                status.textContent = error.message;
+                toast(error.message, 'error');
+            } finally {
+                button.disabled = Notification.permission === 'denied';
+            }
+        });
+    }
+
+    function setupBackupForms() {
+        const exportForm = $('#backupExportForm');
+        const restoreForm = $('#backupRestoreForm');
+        const status = $('#backupStatus');
+        const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const responseError = async response => {
+            if (response.status === 403) return 'Доступно администратору';
+            const payload = await response.json().catch(() => null);
+            return payload?.error || `Ошибка ${response.status}`;
+        };
+        if (exportForm && !exportForm.dataset.ready) {
+            exportForm.dataset.ready = '1';
+            exportForm.addEventListener('submit', async event => {
+                event.preventDefault();
+                const button = $('button[type="submit"]', exportForm);
+                const password = exportForm.elements.backup_export_key.value;
+                button.disabled = true;
+                status.textContent = 'Создаём копию…';
+                try {
+                    const response = await fetch('/api/backups/export', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, body: JSON.stringify({ password }) });
+                    if (!response.ok) throw new Error(await responseError(response));
+                    const blob = await response.blob();
+                    const disposition = response.headers.get('Content-Disposition') || '';
+                    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'finflow.ffbackup';
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    status.textContent = 'Копия скачана';
+                } catch (error) { status.textContent = error.message; }
+                finally { exportForm.reset(); button.disabled = false; }
+            });
+        }
+        if (restoreForm && !restoreForm.dataset.ready) {
+            restoreForm.dataset.ready = '1';
+            restoreForm.addEventListener('submit', async event => {
+                event.preventDefault();
+                if (!restoreForm.elements.confirm_restore.checked || !confirm('Заменить текущую базу данными из копии?')) return;
+                const button = $('button[type="submit"]', restoreForm);
+                const body = new FormData();
+                body.append('password', restoreForm.elements.backup_restore_key.value);
+                body.append('backup', restoreForm.elements.backup.files[0]);
+                button.disabled = true;
+                status.textContent = 'Восстанавливаем базу…';
+                try {
+                    const response = await fetch('/api/backups/restore', { method: 'POST', headers: { 'X-CSRF-Token': csrf() }, body });
+                    if (!response.ok) throw new Error(await responseError(response));
+                    status.textContent = 'База восстановлена';
+                    restoreForm.reset();
+                    window.location.reload();
+                } catch (error) { status.textContent = error.message; button.disabled = false; restoreForm.elements.backup_restore_key.value = ''; }
+            });
+        }
+    }
+
     async function loadSettings() {
-        const [data, budgets, accounts] = await Promise.all([
+        const supportsPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+        const [data, budgets, accounts, projects, pushConfig] = await Promise.all([
             api('/api/settings'),
             api('/api/budgets'),
             api('/api/accounts'),
+            api('/api/projects'),
+            supportsPush ? api('/api/push/config') : Promise.resolve(null),
         ]);
         const form = $('#settingsForm');
+        const backupSettings = $('#backupSettings');
+        if (backupSettings) backupSettings.hidden = !state.bootstrap.user?.is_admin;
         Object.entries(data).forEach(([key, value]) => { if (form.elements[key]) form.elements[key].value = value; });
         if (!form.dataset.ready) {
             form.dataset.ready = '1';
@@ -1225,6 +1554,24 @@
             addAccountButton.dataset.ready = '1';
             addAccountButton.addEventListener('click', () => openAccountForm());
         }
+        const projectList = $('#projectSettings');
+        if (projectList) {
+            projectList.innerHTML = projects.length ? projects.map(project => `<div class="project-setting-row ${project.status === 'archived' ? 'is-inactive' : ''}" style="--project-color:${escapeHtml(project.color || '#82c79d')}"><div class="project-setting-icon">${iconSvg(project.icon || 'briefcase')}</div><div><strong>${escapeHtml(project.name)}</strong><span>${project.transaction_count} ${pluralize(project.transaction_count, ['операция', 'операции', 'операций'])}</span></div><b>${money(project.spent)}</b><button class="btn btn-ghost" type="button" data-toggle-project="${project.id}" data-status="${project.status}">${project.status === 'archived' ? 'Вернуть' : 'Архивировать'}</button></div>`).join('') : '<div class="empty-state">Проектов пока нет</div>';
+            $$('[data-toggle-project]', projectList).forEach(button => button.addEventListener('click', async () => {
+                try {
+                    await api(`/api/projects/${button.dataset.toggleProject}`, { method: 'PATCH', body: { status: button.dataset.status === 'archived' ? 'active' : 'archived' } });
+                    await refreshBootstrap();
+                    loadSettings();
+                } catch (error) { toast(error.message, 'error'); }
+            }));
+        }
+        const addProjectButton = $('#addProjectBtn');
+        if (addProjectButton && !addProjectButton.dataset.ready) {
+            addProjectButton.dataset.ready = '1';
+            addProjectButton.addEventListener('click', openProjectForm);
+        }
+        await renderPushSettings(pushConfig);
+        if (state.bootstrap.user?.is_admin) setupBackupForms();
     }
 
     async function loadRecurring() {
@@ -1284,6 +1631,144 @@
         syncFields();
     }
 
+    function renderMoneyFlow(flow = {}) {
+        const container = $('#moneyFlow');
+        if (!container) return;
+        const income = Number(flow.income || 0);
+        const expense = Number(flow.expense || 0);
+        const invested = Number(flow.invested || 0);
+        const categories = [...(flow.categories || [])];
+        const visibleCategories = categories.slice(0, 4);
+        const other = categories.slice(4).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        if (other) visibleCategories.push({ label: 'Остальные расходы', amount: other, color: '#74847c' });
+        const remainder = income - expense - invested;
+        const destinations = [
+            ...visibleCategories.map(item => ({ label: item.label, amount: Number(item.amount || 0), color: item.color || 'var(--red)' })),
+            ...(invested ? [{ label: 'Инвестиции', amount: invested, color: 'var(--purple)' }] : []),
+            { label: remainder >= 0 ? 'Остаток' : 'Дефицит', amount: Math.abs(remainder), color: remainder >= 0 ? 'var(--green)' : 'var(--red)' },
+        ];
+        const scale = Math.max(1, income, ...destinations.map(item => item.amount));
+        container.innerHTML = `<div class="money-flow__source"><span>Доходы</span><strong>${money(income)}</strong></div><div class="money-flow__routes" role="list" aria-label="Распределение доходов">${destinations.map(item => {
+            const percent = item.amount / scale * 100;
+            return `<div class="money-flow__route" role="listitem" aria-label="${escapeHtml(item.label)}: ${money(item.amount)}"><div><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div><i style="--flow-color:${escapeHtml(item.color)};--flow-width:${item.amount ? Math.max(2, percent) : 0}%;--flow-weight:${Math.max(4, Math.min(16, 4 + percent / 6))}px"></i></div>`;
+        }).join('')}</div>`;
+    }
+
+    function renderExpenseHeatmap(items = [], endLabel) {
+        const container = $('#expenseHeatmap');
+        if (!container) return;
+        const amounts = new Map(items.map(item => [item.date, Number(item.amount || 0)]));
+        const end = new Date(`${endLabel || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+        const weekday = (end.getUTCDay() + 6) % 7;
+        const start = new Date(end);
+        start.setUTCDate(start.getUTCDate() - weekday - 77);
+        const max = Math.max(0, ...amounts.values());
+        const cells = [];
+        for (let index = 0; index < 84; index += 1) {
+            const day = new Date(start);
+            day.setUTCDate(start.getUTCDate() + index);
+            const date = day.toISOString().slice(0, 10);
+            const amount = amounts.get(date) || 0;
+            const future = day > end;
+            const level = amount && max ? Math.max(1, Math.min(4, Math.ceil(Math.sqrt(amount / max) * 4))) : 0;
+            cells.push(`<button class="heatmap-cell level-${level}${future ? ' is-future' : ''}" type="button" style="grid-column:${Math.floor(index / 7) + 1};grid-row:${index % 7 + 1}" data-heatmap-date="${date}" data-heatmap-amount="${amount}" aria-label="${formatDate(date, { day: 'numeric', month: 'long' })}: ${money(amount)}" ${future ? 'disabled' : ''}></button>`);
+        }
+        container.innerHTML = `<div class="heatmap-layout"><div class="heatmap-weekdays" aria-hidden="true"><span>Пн</span><span>Ср</span><span>Пт</span></div><div class="heatmap-grid">${cells.join('')}</div></div><div class="heatmap-footer"><span id="heatmapCaption">Выберите день</span><div class="heatmap-legend" aria-label="Интенсивность расходов"><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i></div></div>`;
+        const caption = $('#heatmapCaption', container);
+        $$('[data-heatmap-date]', container).forEach(cell => {
+            const show = () => { caption.textContent = `${formatDate(cell.dataset.heatmapDate, { day: 'numeric', month: 'long' })} · ${money(cell.dataset.heatmapAmount)}`; };
+            cell.addEventListener('pointerenter', show);
+            cell.addEventListener('focus', show);
+            cell.addEventListener('click', show);
+        });
+    }
+
+    function renderExpenseWaterfall(data = {}) {
+        const container = $('#expenseWaterfall');
+        if (!container) return;
+        const income = Number(data.income || 0);
+        const categories = [...(data.categories || [])];
+        const visible = categories.slice(0, 4);
+        const other = categories.slice(4).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        if (other) visible.push({ label: 'Остальные', amount: other, color: '#74847c' });
+        let running = income;
+        const bars = [{ label: 'Доход', start: 0, end: income, amount: income, tone: 'positive' }];
+        visible.forEach(item => {
+            const amount = Number(item.amount || 0);
+            bars.push({ label: item.label, start: running, end: running - amount, amount: -amount, tone: 'negative' });
+            running -= amount;
+        });
+        const remainder = Number(data.remainder ?? running);
+        bars.push({ label: 'Остаток', start: 0, end: remainder, amount: remainder, tone: remainder >= 0 ? 'remainder' : 'negative' });
+        const min = Math.min(0, ...bars.flatMap(item => [item.start, item.end]));
+        const max = Math.max(1, ...bars.flatMap(item => [item.start, item.end]));
+        const range = max - min;
+        container.innerHTML = `<div class="waterfall-chart" style="--waterfall-count:${bars.length}" role="list" aria-label="Изменение остатка">${bars.map(item => {
+            const bottom = (Math.min(item.start, item.end) - min) / range * 100;
+            const height = Math.max(2, Math.abs(item.end - item.start) / range * 100);
+            const amountLabel = `${item.amount < 0 ? '−' : ''}${compactMoney(Math.abs(item.amount))}`;
+            return `<div class="waterfall-item is-${item.tone}" role="listitem" tabindex="0" aria-label="${escapeHtml(item.label)}: ${money(item.amount)}" title="${escapeHtml(item.label)}: ${money(item.amount)}"><div class="waterfall-track"><i style="bottom:${bottom}%;height:${height}%"></i></div><strong>${amountLabel}</strong><span>${escapeHtml(item.label)}</span></div>`;
+        }).join('')}</div>`;
+    }
+
+    function setupAnalyticsLayout() {
+        const grid = $('.analytics-grid');
+        if (!grid || grid.dataset.orderReady) return;
+        grid.dataset.orderReady = '1';
+        const storageKey = 'finflow-analytics-order-v1';
+        const cards = () => $$('[data-card-key]', grid);
+        const applyOrder = order => {
+            const byKey = new Map(cards().map(card => [card.dataset.cardKey, card]));
+            order.forEach(key => byKey.get(key) && grid.appendChild(byKey.get(key)));
+            byKey.forEach(card => { if (!order.includes(card.dataset.cardKey)) grid.appendChild(card); });
+        };
+        const defaultOrder = cards().map(card => card.dataset.cardKey);
+        try {
+            const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            if (Array.isArray(saved)) applyOrder(saved);
+        } catch (error) { /* noop */ }
+        if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+            let dragged = null;
+            cards().forEach(card => {
+                const handle = document.createElement('button');
+                handle.type = 'button';
+                handle.className = 'card-drag-handle';
+                handle.setAttribute('aria-label', 'Перетащить карточку');
+                handle.title = 'Изменить порядок';
+                handle.innerHTML = iconSvg('menu');
+                card.appendChild(handle);
+                handle.addEventListener('pointerdown', () => { card.draggable = true; });
+                handle.addEventListener('pointerup', () => { if (!dragged) card.draggable = false; });
+                handle.addEventListener('pointercancel', () => { if (!dragged) card.draggable = false; });
+                card.addEventListener('dragstart', event => {
+                    if (!card.draggable) { event.preventDefault(); return; }
+                    dragged = card;
+                    card.classList.add('is-dragging');
+                    event.dataTransfer.effectAllowed = 'move';
+                });
+                card.addEventListener('dragend', () => {
+                    card.draggable = false;
+                    card.classList.remove('is-dragging');
+                    dragged = null;
+                    try { localStorage.setItem(storageKey, JSON.stringify(cards().map(item => item.dataset.cardKey))); } catch (error) { /* noop */ }
+                });
+            });
+            grid.addEventListener('dragover', event => {
+                const target = event.target.closest('[data-card-key]');
+                if (!dragged || !target || target === dragged) return;
+                event.preventDefault();
+                const box = target.getBoundingClientRect();
+                const after = event.clientY > box.top + box.height / 2 || event.clientX > box.left + box.width / 2;
+                grid.insertBefore(dragged, after ? target.nextSibling : target);
+            });
+        }
+        $('#resetAnalyticsOrder')?.addEventListener('click', () => {
+            applyOrder(defaultOrder);
+            try { localStorage.removeItem(storageKey); } catch (error) { /* noop */ }
+            toast('Порядок восстановлен');
+        });
+    }
+
     async function submitScenario(form) {
         try {
             const result = await api('/api/insights/what-if', { method: 'POST', body: Object.fromEntries(new FormData(form).entries()) });
@@ -1294,18 +1779,19 @@
     async function loadInsights() {
         const query = new URLSearchParams({ period: state.period, anchor: state.anchor });
         if (state.personId) query.set('person_id', state.personId);
-        const [insights, report, summary, capitalHistory] = await Promise.all([
+        const [insights, report, summary, capitalHistory, visualData] = await Promise.all([
             api('/api/insights'),
             api('/api/weekly-report'),
             api(`/api/summary?${query}`),
             api('/api/capital-history'),
+            api(`/api/visual-data?${query}`),
         ]);
         setPeriodLabel(summary);
         const current = summary.current;
-        $('#metricIncome').textContent = money(current.income);
-        $('#metricExpense').textContent = money(current.expense);
-        $('#metricNet').textContent = money(current.net, true);
-        $('#metricInvested').textContent = money(current.invested);
+        setAnimatedMoney('metricIncome', current.income);
+        setAnimatedMoney('metricExpense', current.expense);
+        setAnimatedMoney('metricNet', current.net, true);
+        setAnimatedMoney('metricInvested', current.invested);
         setDelta('deltaIncome', summary.delta.income);
         setDelta('deltaExpense', summary.delta.expense, true);
         setDelta('deltaNet', summary.delta.net);
@@ -1327,8 +1813,11 @@
         $('#largestExpense').textContent = spending.largest ? money(spending.largest.amount) : '—';
         $('#largestExpenseMeta').textContent = spending.largest ? `${spending.largest.category_name} · ${formatDate(spending.largest.tx_date)}` : 'Расходов пока нет';
         drawLineChart($('#trendChart'), summary.trend);
-        $('#capitalCurrent').textContent = money(summary.total_capital);
+        setAnimatedMoney('capitalCurrent', summary.total_capital);
         drawLineChart($('#capitalHistory'), capitalHistory, ['capital']);
+        renderMoneyFlow(visualData.flow);
+        renderExpenseHeatmap(visualData.heatmap, summary.end);
+        renderExpenseWaterfall(visualData.waterfall);
         renderCategories(summary.breakdown);
         renderCategoryDonut(summary.breakdown);
         const cushion = insights.cushion;
@@ -1367,6 +1856,13 @@
             form.account_id.innerHTML = accountOptions(null, false);
             form.target_account_id.innerHTML = accountOptions();
             form.category_id.innerHTML = categoryOptions(form.tx_type.value || 'expense', true);
+            form.project_id.innerHTML = projectOptions(false);
+        }
+        const projectFilter = $('#txProjectFilter');
+        if (projectFilter) {
+            const previous = projectFilter.value;
+            projectFilter.innerHTML = projectOptions(true);
+            projectFilter.value = previous;
         }
     }
 
@@ -1432,7 +1928,9 @@
             state.anchor = state.bootstrap.today;
             setupNavigation();
             setupTransactionModal();
+            setupAnalyticsLayout();
             $('#txTypeFilter')?.addEventListener('change', () => { state.txPage = 1; loadTransactions(); });
+            $('#txProjectFilter')?.addEventListener('change', () => { state.txPage = 1; loadTransactions(); });
             $('#addCategoryBtn')?.addEventListener('click', openCategoryForm);
             $('#addDashboardCategory')?.addEventListener('click', openCategoryForm);
             $('#addGoalBtn')?.addEventListener('click', openGoalForm);

@@ -122,6 +122,24 @@ cd ~/finance_tracker
 скрипт сам перезагрузит Web App. Иначе останется нажать **Reload** на вкладке Web.
 Миграции additive и применяются при старте.
 
+### 6. Push-уведомления PWA
+
+Один раз создайте приватные VAPID-ключи (они сохраняются вне Git с правами `600`):
+
+```bash
+cd ~/finance_tracker
+.venv/bin/flask --app app generate-vapid-keys --subject mailto:your-email@example.com
+```
+
+Перезагрузите Web App. Затем добавьте в **Tasks** ежедневную команду:
+
+```bash
+cd /home/<username>/finance_tracker && .venv/bin/flask --app app send-push-notifications
+```
+
+После этого включите уведомления в настройках установленного PWA. Сервер отправляет
+одно уведомление о достигнутом лимите категории и напоминания о наступивших регулярных операциях.
+
 ## Автоматический CI/CD после push
 
 Workflow `.github/workflows/deploy-pythonanywhere.yml` запускается только после

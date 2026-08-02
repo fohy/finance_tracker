@@ -6,6 +6,7 @@ requests and translate domain errors to responses.
 """
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 
@@ -14,6 +15,18 @@ from .errors import DomainError, NotFoundError
 from .services import parse_date
 
 USER_TRANSACTION_TYPES = frozenset({"income", "expense", "transfer"})
+AUDIT_FIELDS = (
+    "tx_type", "amount", "target_amount", "tx_date", "category_id", "person_id",
+    "account_id", "target_account_id", "project_id", "note",
+)
+
+
+def _audit_snapshot(row: object) -> dict[str, object]:
+    return {field: row[field] for field in AUDIT_FIELDS}  # type: ignore[index]
+
+
+def _audit_details(*, before: dict[str, object] | None, after: dict[str, object] | None) -> str:
+    return json.dumps({"before": before, "after": after}, ensure_ascii=False, separators=(",", ":"))
 
 
 def _entity_exists(table: str, entity_id: int | None) -> bool:
@@ -80,6 +93,7 @@ def create_transaction(
     note: str,
     actor_user_id: int | None = None,
     target_amount: float | None = None,
+    project_id: int | None = None,
     commit: bool = True,
 ) -> int:
     if tx_type not in USER_TRANSACTION_TYPES:
@@ -140,16 +154,24 @@ def create_transaction(
             category = get_db().execute("SELECT type FROM categories WHERE id = ?", (category_id,)).fetchone()
             if category["type"] != tx_type:
                 raise DomainError("Тип категории не соответствует типу операции")
+    if project_id is not None:
+        if tx_type != "expense":
+            raise DomainError("Проект можно указать только для расхода")
+        _require_entity("projects", project_id, "Проект")
 
     db = get_db()
     try:
         cursor = db.execute(
             """INSERT INTO transactions(tx_type, amount, tx_date, category_id, person_id,
-                       account_id, target_account_id, note, target_amount)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       account_id, target_account_id, note, target_amount, project_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (tx_type, round(amount, 2), _validate_date(tx_date), category_id, person_id,
-             account_id, target_account_id, note, round(target_amount, 2) if target_amount else None),
+             account_id, target_account_id, note, round(target_amount, 2) if target_amount else None,
+             project_id),
         )
+        transaction_id = cursor.lastrowid
+        if transaction_id is None:
+            raise RuntimeError("Не удалось создать операцию")
         signed_amount = amount if tx_type == "income" else -amount
         db.execute("UPDATE accounts SET balance = ROUND(balance + ?, 2) WHERE id = ?", (signed_amount, account_id))
         if tx_type == "transfer":
@@ -157,10 +179,12 @@ def create_transaction(
                 "UPDATE accounts SET balance = ROUND(balance + ?, 2) WHERE id = ?",
                 (target_amount, target_account_id),
             )
+        created = db.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
         db.execute(
             """INSERT INTO audit_log(action, entity_type, entity_id, details, actor_user_id)
                VALUES (?, ?, ?, ?, ?)""",
-            ("created", "transaction", cursor.lastrowid, tx_type, actor_user_id),
+            ("created", "transaction", transaction_id,
+             _audit_details(before=None, after=_audit_snapshot(created)), actor_user_id),
         )
         if commit:
             db.commit()
@@ -168,7 +192,7 @@ def create_transaction(
         if commit:
             db.rollback()
         raise
-    return int(cursor.lastrowid)
+    return int(transaction_id)
 
 
 def delete_transaction(tx_id: int, actor_user_id: int | None = None) -> None:
@@ -186,9 +210,10 @@ def delete_transaction(tx_id: int, actor_user_id: int | None = None) -> None:
             db.execute("UPDATE accounts SET balance = ROUND(balance - ?, 2) WHERE id = ?", (credited, row["target_account_id"]))
         db.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
         db.execute(
-            """INSERT INTO audit_log(action, entity_type, entity_id, actor_user_id)
-               VALUES (?, ?, ?, ?)""",
-            ("deleted", "transaction", tx_id, actor_user_id),
+            """INSERT INTO audit_log(action, entity_type, entity_id, details, actor_user_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("deleted", "transaction", tx_id,
+             _audit_details(before=_audit_snapshot(row), after=None), actor_user_id),
         )
         db.commit()
     except Exception:
@@ -199,6 +224,7 @@ def delete_transaction(tx_id: int, actor_user_id: int | None = None) -> None:
 def update_transaction_metadata(
     tx_id: int, *, amount: float | None, tx_date: str | None, note: str | None,
     person_id: int | None, category_id: int | None,
+    project_id: int | None = None, update_project: bool = False,
     actor_user_id: int | None = None,
 ) -> None:
     """Edit user-facing transaction fields and keep affected balances in sync."""
@@ -238,6 +264,12 @@ def update_transaction_metadata(
         if category["type"] != row["tx_type"]:
             raise DomainError("Тип категории не соответствует типу операции")
         updates["category_id"] = category_id
+    if update_project:
+        if project_id is not None:
+            if row["tx_type"] != "expense":
+                raise DomainError("Проект можно указать только для расхода")
+            _require_entity("projects", project_id, "Проект")
+        updates["project_id"] = project_id
     if not updates:
         raise DomainError("Нет полей для изменения")
     try:
@@ -257,10 +289,12 @@ def update_transaction_metadata(
                 )
         assignments = ", ".join(f"{field} = ?" for field in updates)
         db.execute(f"UPDATE transactions SET {assignments} WHERE id = ?", [*updates.values(), tx_id])
+        updated = db.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
         db.execute(
             """INSERT INTO audit_log(action, entity_type, entity_id, details, actor_user_id)
                VALUES (?, ?, ?, ?, ?)""",
-            ("updated", "transaction", tx_id, ",".join(updates), actor_user_id),
+            ("updated", "transaction", tx_id,
+             _audit_details(before=_audit_snapshot(row), after=_audit_snapshot(updated)), actor_user_id),
         )
         db.commit()
     except Exception:

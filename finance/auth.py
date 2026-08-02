@@ -55,6 +55,19 @@ def login_required(view):
     return wrapped
 
 
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        user = current_user()
+        if user is None:
+            return jsonify({"ok": False, "error": "Требуется вход"}), 401
+        if not user["is_admin"]:
+            return jsonify({"ok": False, "error": "Требуются права администратора"}), 403
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 def init_auth(app) -> None:
     @app.before_request
     def protect_private_routes() -> Response | None:
