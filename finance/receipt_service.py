@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from curl_cffi import requests
+from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
 REQUIRED_QR_FIELDS = ("t", "s", "fn", "i", "fp", "n")
 PROVERKACHEKA_URL = "https://proverkacheka.com/api/v1/check/get"
@@ -93,7 +94,7 @@ def fetch_receipt(raw_value: Any, token: str) -> dict[str, Any]:
         )
         response.raise_for_status()
         result = response.json()
-    except (requests.RequestException, json.JSONDecodeError) as exc:
+    except (CurlRequestException, json.JSONDecodeError) as exc:
         raise ValueError("Не удалось получить состав чека из ProverkaCheka") from exc
     if int(result.get("code", 0)) != 1:
         detail = result.get("text") or result.get("message")

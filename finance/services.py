@@ -48,8 +48,10 @@ def period_bounds(period: str, anchor: str | None = None) -> tuple[date, date]:
 
 
 def previous_period(start: date, end: date) -> tuple[date, date]:
-    span = (end - start).days + 1
     previous_end = start - timedelta(days=1)
+    if start.day == 1 and end.day == monthrange(end.year, end.month)[1]:
+        return previous_end.replace(day=1), previous_end
+    span = (end - start).days + 1
     return previous_end - timedelta(days=span - 1), previous_end
 
 
@@ -243,6 +245,7 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
     savings_balance = sum(a["balance"] for a in accounts if a["account_type"] in {"savings", "deposit"})
     currency_balance = sum(a["base_equivalent"] for a in accounts if a["account_type"] == "currency")
     investment_balance = sum(a["balance"] for a in accounts if a["account_type"] == "investment")
+    invested_balance = savings_balance + currency_balance + investment_balance
 
     def delta(key: str) -> float:
         old = previous[key]
@@ -258,6 +261,8 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
         "anchor": (parse_date(anchor)).isoformat(),
         "start": start.isoformat(),
         "end": end.isoformat(),
+        "previous_start": prev_start.isoformat(),
+        "previous_end": prev_end.isoformat(),
         "current": current,
         "previous": previous,
         "delta": {k: delta(k) for k in ("income", "expense", "net", "invested")},
@@ -266,7 +271,8 @@ def get_summary(period: str, anchor: str | None = None, person_id: int | None = 
         "savings_balance": round(savings_balance, 2),
         "currency_balance": round(currency_balance, 2),
         "investment_balance": round(investment_balance, 2),
-        "total_capital": round(life_balance + savings_balance + currency_balance + investment_balance, 2),
+        "invested_balance": round(invested_balance, 2),
+        "total_capital": round(life_balance + invested_balance, 2),
         "score": score,
         "forecast": forecast,
     }
@@ -491,6 +497,55 @@ def investment_balance_series() -> list[dict[str, Any]]:
     today = date.today().isoformat()
     if result[-1]["label"] < today:
         result.append({"label": today, "invested": round(current_balance, 2)})
+    return result
+
+
+def capital_history_series() -> list[dict[str, Any]]:
+    """Reconstruct total capital from current balances and transaction ledger deltas."""
+    db = get_db()
+    current_row = db.execute(
+        """SELECT COALESCE(SUM(balance * CASE WHEN account_type = 'currency' THEN exchange_rate ELSE 1 END), 0) capital
+           FROM accounts
+           WHERE account_type IN ('checking', 'cash', 'savings', 'deposit', 'currency', 'investment')"""
+    ).fetchone()
+    current_capital = float(current_row["capital"])
+    rows = db.execute(
+        """SELECT t.tx_date label, SUM(
+               CASE
+                   WHEN t.tx_type IN ('income', 'interest')
+                       THEN t.amount * CASE WHEN sa.account_type = 'currency' THEN sa.exchange_rate ELSE 1 END
+                   WHEN t.tx_type IN ('expense', 'transfer')
+                       THEN -t.amount * CASE WHEN sa.account_type = 'currency' THEN sa.exchange_rate ELSE 1 END
+                   ELSE 0
+               END
+               + CASE
+                   WHEN t.tx_type = 'transfer'
+                       THEN COALESCE(t.target_amount, t.amount)
+                           * CASE WHEN ta.account_type = 'currency' THEN ta.exchange_rate ELSE 1 END
+                   ELSE 0
+               END
+           ) delta
+           FROM transactions t
+           JOIN accounts sa ON sa.id = t.account_id
+           LEFT JOIN accounts ta ON ta.id = t.target_account_id
+           GROUP BY t.tx_date
+           ORDER BY t.tx_date"""
+    ).fetchall()
+    if not rows:
+        return [{"label": date.today().isoformat(), "capital": round(current_capital, 2)}] if current_capital else []
+
+    opening_capital = current_capital - sum(float(row["delta"] or 0) for row in rows)
+    running_capital = opening_capital
+    result = [{
+        "label": (parse_date(rows[0]["label"]) - timedelta(days=1)).isoformat(),
+        "capital": round(opening_capital, 2),
+    }]
+    for row in rows:
+        running_capital += float(row["delta"] or 0)
+        result.append({"label": row["label"], "capital": round(running_capital, 2)})
+    today = date.today().isoformat()
+    if result[-1]["label"] < today:
+        result.append({"label": today, "capital": round(current_capital, 2)})
     return result
 
 

@@ -197,10 +197,11 @@ def delete_transaction(tx_id: int, actor_user_id: int | None = None) -> None:
 
 
 def update_transaction_metadata(
-    tx_id: int, *, tx_date: str | None, note: str | None, person_id: int | None, category_id: int | None,
+    tx_id: int, *, amount: float | None, tx_date: str | None, note: str | None,
+    person_id: int | None, category_id: int | None,
     actor_user_id: int | None = None,
 ) -> None:
-    """Edit non-balance fields without ever rewriting the financial ledger."""
+    """Edit user-facing transaction fields and keep affected balances in sync."""
     db = get_db()
     row = db.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
     if not row:
@@ -208,6 +209,22 @@ def update_transaction_metadata(
     if row["tx_type"] == "interest":
         raise DomainError("Автоматическое начисление нельзя редактировать вручную")
     updates: dict[str, object] = {}
+    amount_update: tuple[float, float | None] | None = None
+    if amount is not None:
+        rounded_amount = round(amount, 2)
+        if rounded_amount <= 0:
+            raise DomainError("Сумма должна быть больше нуля")
+        updates["amount"] = rounded_amount
+        if row["tx_type"] == "transfer":
+            old_amount = float(row["amount"])
+            old_target_amount = float(row["target_amount"] or old_amount)
+            new_target_amount = round(old_target_amount * rounded_amount / old_amount, 2)
+            if new_target_amount <= 0:
+                raise DomainError("Сумма зачисления должна быть больше нуля")
+            updates["target_amount"] = new_target_amount
+        else:
+            new_target_amount = None
+        amount_update = (rounded_amount, new_target_amount)
     if tx_date is not None:
         updates["tx_date"] = _validate_date(tx_date)
     if note is not None:
@@ -224,6 +241,20 @@ def update_transaction_metadata(
     if not updates:
         raise DomainError("Нет полей для изменения")
     try:
+        if amount_update is not None:
+            old_amount = float(row["amount"])
+            new_amount, new_target_amount = amount_update
+            direction = 1 if row["tx_type"] == "income" else -1
+            db.execute(
+                "UPDATE accounts SET balance = ROUND(balance + ?, 2) WHERE id = ?",
+                (direction * (new_amount - old_amount), row["account_id"]),
+            )
+            if row["tx_type"] == "transfer" and new_target_amount is not None:
+                old_target_amount = float(row["target_amount"] or old_amount)
+                db.execute(
+                    "UPDATE accounts SET balance = ROUND(balance + ?, 2) WHERE id = ?",
+                    (new_target_amount - old_target_amount, row["target_account_id"]),
+                )
         assignments = ", ".join(f"{field} = ?" for field in updates)
         db.execute(f"UPDATE transactions SET {assignments} WHERE id = ?", [*updates.values(), tx_id])
         db.execute(

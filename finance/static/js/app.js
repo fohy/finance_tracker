@@ -696,6 +696,39 @@
         node.className = result.className;
     }
 
+    function drawPeriodComparison(container, summary) {
+        if (!container) return;
+        const metrics = [
+            { key: 'income', label: 'Доходы', tone: 'income' },
+            { key: 'expense', label: 'Расходы', tone: 'expense' },
+        ];
+        const values = metrics.flatMap(item => [Number(summary.current[item.key] || 0), Number(summary.previous[item.key] || 0)]);
+        const maxValue = Math.max(0, ...values);
+        const currentLabel = periodTitle(summary.start, summary.end, state.period);
+        const previousLabel = periodTitle(summary.previous_start, summary.previous_end, state.period);
+        const periodCopy = $('#comparisonPeriods');
+        if (periodCopy) periodCopy.textContent = `${currentLabel} · предыдущий: ${previousLabel}`;
+        if (!maxValue) {
+            container.innerHTML = '<div class="chart-empty">В обоих периодах пока нет доходов и расходов</div>';
+            return;
+        }
+        const height = value => value ? Math.max(5, Number(value) / maxValue * 100) : 0;
+        container.innerHTML = `<div class="comparison-chart" role="img" aria-label="Сравнение доходов и расходов: текущий и предыдущий периоды">
+            ${metrics.map(item => {
+                const current = Number(summary.current[item.key] || 0);
+                const previous = Number(summary.previous[item.key] || 0);
+                return `<div class="comparison-group comparison-group--${item.tone}">
+                    <div class="comparison-bars" aria-hidden="true">
+                        <i class="comparison-bar is-current" style="--bar-height:${height(current)}%" title="Текущий период: ${money(current)}"></i>
+                        <i class="comparison-bar is-previous" style="--bar-height:${height(previous)}%" title="Предыдущий период: ${money(previous)}"></i>
+                    </div>
+                    <strong>${item.label}</strong>
+                    <div class="comparison-values"><span><i></i>Сейчас <b>${money(current)}</b></span><span><i></i>Ранее <b>${money(previous)}</b></span></div>
+                </div>`;
+            }).join('')}
+        </div>`;
+    }
+
     function transactionRow(item) {
         const names = { income: 'Доход', expense: 'Расход', transfer: 'Перевод', interest: 'Начисление процентов' };
         const icon = item.category_icon || ({ transfer: 'trend', interest: 'interest' }[item.tx_type] || 'category');
@@ -742,7 +775,7 @@
             return `<text text-anchor="middle" x="${x(index)}" y="${height-8}">${escapeHtml(label)}</text>`;
         }).join('');
         const chartId = ++chartSequence;
-        const tones = { income: 'var(--green)', expense: 'var(--red)', invested: 'var(--purple)' };
+        const tones = { income: 'var(--green)', expense: 'var(--red)', invested: 'var(--purple)', capital: 'var(--green)' };
         const defs = series.map(key => `<linearGradient id="chart-fill-${chartId}-${key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".28"/><stop offset="1" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".015"/></linearGradient>`).join('');
         const plots = series.map(key => {
             const line = path(key);
@@ -764,42 +797,9 @@
             api(`/api/budgets?anchor=${state.anchor}`),
         ]);
         setPeriodLabel(data);
-        const current = data.current;
         $('#lifeBalance').textContent = money(data.life_balance);
-        const savingsBalance = $('#savingsBalance');
-        if (savingsBalance) savingsBalance.textContent = money(data.savings_balance);
-        const currencyBalance = $('#currencyBalance');
-        if (currencyBalance) currencyBalance.textContent = money(data.currency_balance);
-        $('#investmentBalance').textContent = money(data.investment_balance);
+        $('#investmentBalance').textContent = money(data.invested_balance);
         $('#totalCapital').textContent = money(data.total_capital);
-        $('#capitalTrend').textContent = `${data.score.savings_rate >= 0 ? '+' : ''}${data.score.savings_rate}% сбережений`;
-        $('#metricIncome').textContent = money(current.income);
-        $('#metricExpense').textContent = money(current.expense);
-        $('#metricNet').textContent = money(current.net, true);
-        $('#metricInvested').textContent = money(current.invested);
-        setDelta('deltaIncome', data.delta.income);
-        setDelta('deltaExpense', data.delta.expense, true);
-        setDelta('deltaNet', data.delta.net);
-        setDelta('deltaInvested', data.delta.invested);
-        $('#scoreValue').textContent = data.score.value;
-        $('#scoreLabel').textContent = data.score.label;
-        $('#scoreTip').textContent = data.score.tips[0];
-        $('#scoreRing').style.setProperty('--score', `${data.score.value * 3.6}deg`);
-        $('#forecastIncome').textContent = money(data.forecast.income);
-        $('#forecastExpense').textContent = money(data.forecast.expense);
-        $('#forecastNet').textContent = money(data.forecast.net, true);
-        $('#forecastInvested').textContent = money(data.forecast.invested);
-        const spending = data.spending_stats;
-        $('#averageDailyExpense').textContent = money(spending.average_per_day);
-        $('#averageExpense').textContent = money(spending.average_transaction);
-        $('#expenseCount').textContent = new Intl.NumberFormat('ru-RU').format(spending.transaction_count);
-        $('#activeExpenseDays').textContent = `${spending.active_days} ${pluralize(spending.active_days, ['активный день', 'активных дня', 'активных дней'])}`;
-        $('#largestExpense').textContent = spending.largest ? money(spending.largest.amount) : '—';
-        $('#largestExpenseMeta').textContent = spending.largest
-            ? `${spending.largest.category_name} · ${formatDate(spending.largest.tx_date)}`
-            : 'Расходов пока нет';
-        drawLineChart($('#trendChart'), data.trend);
-        renderCategories(data.breakdown);
         renderBudgets(budgets, $('#budgetOverview'));
         $('#recentTransactions').innerHTML = tx.items.length ? tx.items.map(transactionRow).join('') : '<div class="empty-state">Операций за период нет</div>';
     }
@@ -826,6 +826,25 @@
                 <strong>${money(item.amount)}</strong>
             </div>`;
         }).join('');
+    }
+
+    function renderCategoryDonut(items) {
+        const donut = $('#categoryDonut');
+        if (!donut) return;
+        const total = items.reduce((sum, item) => sum + Number(item.amount), 0);
+        if (!total) {
+            donut.style.background = 'var(--control-bg)';
+            donut.innerHTML = '<strong>—</strong><span>нет расходов</span>';
+            return;
+        }
+        let cursor = 0;
+        const segments = items.map(item => {
+            const start = cursor;
+            cursor += Number(item.amount) / total * 100;
+            return `${item.color || 'var(--primary)'} ${start}% ${cursor}%`;
+        });
+        donut.style.background = `conic-gradient(${segments.join(',')})`;
+        donut.innerHTML = `<strong>${money(total)}</strong><span>расходов</span>`;
     }
 
     function renderBudgets(items, container) {
@@ -858,12 +877,12 @@
                 <td data-label="Человек">${item.person_name ? `<span class="person-pill" style="--avatar:${escapeHtml(item.avatar_color)}"><i>${escapeHtml(item.person_name[0])}</i>${escapeHtml(item.person_name)}</span>` : '—'}</td>
                 <td data-label="Счёт">${escapeHtml(item.account_name || '—')}${item.target_account_name ? `<div class="subtext">Счёт назначения: ${escapeHtml(item.target_account_name)}</div>` : ''}</td>
                 <td data-label="Сумма" class="align-right"><strong class="tx-amount ${item.tx_type}">${prefix}${money(item.amount)}</strong></td>
-                <td class="row-actions">${item.tx_type !== 'interest' ? `<button class="delete-btn" data-edit-tx="${item.id}" data-date="${item.tx_date}" data-note="${escapeHtml(item.note || '')}" title="Исправить заметку или дату" aria-label="Исправить операцию">${iconSvg('edit')}</button><button class="delete-btn" data-duplicate-tx="${item.id}" title="Дублировать" aria-label="Дублировать операцию">${iconSvg('copy')}</button><button class="delete-btn" data-delete-tx="${item.id}" title="Удалить" aria-label="Удалить операцию">${iconSvg('trash')}</button>` : ''}</td>
+                <td class="row-actions">${item.tx_type !== 'interest' ? `<button class="delete-btn" data-edit-tx="${item.id}" data-date="${item.tx_date}" data-amount="${Number(item.amount)}" data-note="${escapeHtml(item.note || '')}" title="Исправить сумму, заметку или дату" aria-label="Исправить операцию">${iconSvg('edit')}</button><button class="delete-btn" data-duplicate-tx="${item.id}" title="Дублировать" aria-label="Дублировать операцию">${iconSvg('copy')}</button><button class="delete-btn" data-delete-tx="${item.id}" title="Удалить" aria-label="Удалить операцию">${iconSvg('trash')}</button>` : ''}</td>
             </tr>`;
         }).join('') : '<tr><td colspan="7"><div class="empty-state">За этот период операций нет</div></td></tr>';
         $$('[data-delete-tx]').forEach(btn => btn.addEventListener('click', () => deleteTransaction(btn.dataset.deleteTx)));
         $$('[data-duplicate-tx]').forEach(btn => btn.addEventListener('click', () => duplicateTransaction(btn.dataset.duplicateTx)));
-        $$('[data-edit-tx]').forEach(btn => btn.addEventListener('click', () => editTransaction(btn.dataset.editTx, btn.dataset.date, btn.dataset.note)));
+        $$('[data-edit-tx]').forEach(btn => btn.addEventListener('click', () => editTransaction(btn.dataset.editTx, btn.dataset.date, btn.dataset.amount, btn.dataset.note)));
         renderPagination(data);
     }
 
@@ -889,8 +908,8 @@
         catch (error) { toast(error.message, 'error'); }
     }
 
-    function editTransaction(id, txDate, note) {
-        openEntityForm('Исправить операцию', `<label>Дата<input name="tx_date" type="date" value="${escapeHtml(txDate)}" required></label><label>Заметка<textarea name="note">${escapeHtml(note)}</textarea></label>`, async data => { try { await api(`/api/transactions/${id}`, { method: 'PATCH', body: data }); toast('Операция обновлена'); closeModals(); loadTransactions(); } catch (error) { toast(error.message, 'error'); } });
+    function editTransaction(id, txDate, amount, note) {
+        openEntityForm('Исправить операцию', `<label>Дата<input name="tx_date" type="date" value="${escapeHtml(txDate)}" required></label><label>Сумма<input name="amount" type="number" min="0.01" step="0.01" value="${escapeHtml(amount)}" required></label><label>Заметка<textarea name="note">${escapeHtml(note)}</textarea></label>`, async data => { try { await api(`/api/transactions/${id}`, { method: 'PATCH', body: data }); toast('Операция обновлена'); closeModals(); await refreshBootstrap(); loadTransactions(); } catch (error) { toast(error.message, 'error'); } });
     }
 
     function layoutEntityFormFields(container) {
@@ -935,10 +954,9 @@
     }
 
     async function loadInvestments() {
-        const [accounts, tx, history] = await Promise.all([
+        const [accounts, tx] = await Promise.all([
             api('/api/accounts'),
             api('/api/transactions?period=month&anchor=' + state.anchor + '&per_page=20'),
-            api('/api/investment-balance-history'),
         ]);
         const investments = accounts.filter(a => ['savings', 'deposit', 'currency', 'investment'].includes(a.account_type) && a.is_active);
         const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', currency: 'Валютный', investment: 'Инвестиционный' };
@@ -947,30 +965,6 @@
         $$('[data-configure-interest]').forEach(button => button.addEventListener('click', () => {
             openAccountForm(accounts.find(account => account.id === Number(button.dataset.configureInterest)));
         }));
-        drawLineChart($('#investmentProjection'), history, ['invested']);
-        setupInvestmentCalculator(investments.find(a => a.account_type === 'investment') || investments[0]);
-    }
-
-    function setupInvestmentCalculator(account) {
-        const form = $('#investmentCalculator');
-        if (!form || form.dataset.ready) return;
-        form.dataset.ready = '1';
-        if (account) form.rate.value = account.annual_rate;
-        const calculate = () => {
-            const principal = Number(account?.balance || 0);
-            const monthly = Number(form.monthly.value || 0);
-            const years = Number(form.years.value || 1);
-            const annual = Number(form.rate.value || 0) / 100;
-            const rate = annual / 12;
-            const months = years * 12;
-            let value = principal;
-            for (let i = 0; i <= months; i++) {
-                if (i > 0) value = value * (1 + rate) + monthly;
-            }
-            $('#futureValue').textContent = money(value);
-        };
-        form.addEventListener('input', calculate);
-        calculate();
     }
 
     async function loadGoals() {
@@ -1207,7 +1201,45 @@
     }
 
     async function loadInsights() {
-        const [insights, report, summary] = await Promise.all([api('/api/insights'), api('/api/weekly-report'), api('/api/summary?period=month')]);
+        const query = new URLSearchParams({ period: state.period, anchor: state.anchor });
+        if (state.personId) query.set('person_id', state.personId);
+        const [insights, report, summary, capitalHistory] = await Promise.all([
+            api('/api/insights'),
+            api('/api/weekly-report'),
+            api(`/api/summary?${query}`),
+            api('/api/capital-history'),
+        ]);
+        setPeriodLabel(summary);
+        const current = summary.current;
+        $('#metricIncome').textContent = money(current.income);
+        $('#metricExpense').textContent = money(current.expense);
+        $('#metricNet').textContent = money(current.net, true);
+        $('#metricInvested').textContent = money(current.invested);
+        setDelta('deltaIncome', summary.delta.income);
+        setDelta('deltaExpense', summary.delta.expense, true);
+        setDelta('deltaNet', summary.delta.net);
+        setDelta('deltaInvested', summary.delta.invested);
+        drawPeriodComparison($('#periodComparison'), summary);
+        $('#scoreValue').textContent = summary.score.value;
+        $('#scoreLabel').textContent = summary.score.label;
+        $('#scoreTip').textContent = summary.score.tips[0];
+        $('#scoreRing').style.setProperty('--score', `${summary.score.value * 3.6}deg`);
+        $('#forecastIncome').textContent = money(summary.forecast.income);
+        $('#forecastExpense').textContent = money(summary.forecast.expense);
+        $('#forecastNet').textContent = money(summary.forecast.net, true);
+        $('#forecastInvested').textContent = money(summary.forecast.invested);
+        const spending = summary.spending_stats;
+        $('#averageDailyExpense').textContent = money(spending.average_per_day);
+        $('#averageExpense').textContent = money(spending.average_transaction);
+        $('#expenseCount').textContent = new Intl.NumberFormat('ru-RU').format(spending.transaction_count);
+        $('#activeExpenseDays').textContent = `${spending.active_days} ${pluralize(spending.active_days, ['активный день', 'активных дня', 'активных дней'])}`;
+        $('#largestExpense').textContent = spending.largest ? money(spending.largest.amount) : '—';
+        $('#largestExpenseMeta').textContent = spending.largest ? `${spending.largest.category_name} · ${formatDate(spending.largest.tx_date)}` : 'Расходов пока нет';
+        drawLineChart($('#trendChart'), summary.trend);
+        $('#capitalCurrent').textContent = money(summary.total_capital);
+        drawLineChart($('#capitalHistory'), capitalHistory, ['capital']);
+        renderCategories(summary.breakdown);
+        renderCategoryDonut(summary.breakdown);
         const cushion = insights.cushion;
         $('#cushionRunway').textContent = `${cushion.runway_months} мес. запаса`;
         $('#cushionDetails').innerHTML = `<div class="list-row"><span>Резерв</span><strong>${money(cushion.amount)}</strong></div><div class="list-row"><span>Средние траты в месяц</span><strong>${money(cushion.monthly_burn)}</strong></div><div class="list-row"><span>До цели 3 месяца</span><strong>${money(cushion.gap_3)}</strong></div><div class="list-row"><span>До цели 6 месяцев</span><strong>${money(cushion.gap_6)}</strong></div>`;
@@ -1271,9 +1303,38 @@
         }
     }
 
+    function setupPwa() {
+        const installButton = $('#installAppButton');
+        let installPrompt = null;
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(error => {
+                console.warn('Service worker registration failed:', error);
+            });
+        }
+        window.addEventListener('beforeinstallprompt', event => {
+            event.preventDefault();
+            installPrompt = event;
+            if (installButton) installButton.hidden = false;
+        });
+        installButton?.addEventListener('click', async () => {
+            if (!installPrompt) return;
+            installButton.disabled = true;
+            await installPrompt.prompt();
+            await installPrompt.userChoice;
+            installPrompt = null;
+            installButton.hidden = true;
+            installButton.disabled = false;
+        });
+        window.addEventListener('appinstalled', () => {
+            installPrompt = null;
+            if (installButton) installButton.hidden = true;
+        });
+    }
+
     async function init() {
         setupTheme();
         setupCustomSelects();
+        setupPwa();
         if (state.page === 'login') return;
         try {
             await refreshBootstrap();

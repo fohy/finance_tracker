@@ -59,7 +59,7 @@ def init_auth(app) -> None:
     @app.before_request
     def protect_private_routes() -> Response | None:
         endpoint = request.endpoint or ""
-        if endpoint.startswith("static") or endpoint.startswith("auth."):
+        if endpoint.startswith("static") or endpoint.startswith("auth.") or endpoint == "pages.service_worker":
             return None
         if current_app.config["LOGIN_DISABLED"]:
             return None

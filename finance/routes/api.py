@@ -16,6 +16,7 @@ from ..errors import NotFoundError
 from ..receipt_service import fetch_receipt, normalise_product_name, parse_receipt_qr
 from ..services import (
     accrue_interest,
+    capital_history_series,
     category_breakdown,
     category_budget_status,
     get_summary,
@@ -209,6 +210,7 @@ def update_transaction(tx_id: int):
     data = payload()
     update_transaction_metadata(
         tx_id,
+        amount=as_float(data.get("amount"), "Сумма") if "amount" in data else None,
         tx_date=data.get("tx_date"),
         note=data.get("note"),
         person_id=as_int_or_none(data.get("person_id")) if "person_id" in data else None,
@@ -423,6 +425,12 @@ def accounts():
 def investment_balance_history():
     accrue_interest()
     return ok(investment_balance_series())
+
+
+@api_bp.get("/capital-history")
+def capital_history():
+    accrue_interest()
+    return ok(capital_history_series())
 
 
 @api_bp.post("/accounts")

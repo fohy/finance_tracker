@@ -24,6 +24,14 @@ def test_transfer_updates_both_balances_and_can_be_reversed(client, csrf_headers
     assert next(item for item in accounts if item["id"] == life["id"])["balance"] == initial_life - 1234.56
     assert next(item for item in accounts if item["id"] == investment["id"])["balance"] == initial_investment + 1234.56
 
+    response = client.patch(
+        f"/api/transactions/{transaction_id}", headers=csrf_headers, json={"amount": 1500}
+    )
+    assert response.status_code == 200
+    accounts = client.get("/api/accounts").get_json()["data"]
+    assert next(item for item in accounts if item["id"] == life["id"])["balance"] == initial_life - 1500
+    assert next(item for item in accounts if item["id"] == investment["id"])["balance"] == initial_investment + 1500
+
     assert client.delete(f"/api/transactions/{transaction_id}", headers=csrf_headers).status_code == 200
     accounts = client.get("/api/accounts").get_json()["data"]
     assert next(item for item in accounts if item["id"] == life["id"])["balance"] == initial_life

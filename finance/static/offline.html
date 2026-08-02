@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#173d31">
+    <title>FinFlow · Нет сети</title>
+    <style>
+        :root { color-scheme: dark; font-family: ui-rounded, "Avenir Next", sans-serif; }
+        * { box-sizing: border-box; }
+        body { display: grid; min-height: 100vh; margin: 0; padding: 24px; place-items: center; color: #dce9e2; background: radial-gradient(circle at 80% 10%, #254b3d 0, transparent 38%), #101814; }
+        main { width: min(460px, 100%); padding: 36px; background: #17231e; border: 1px solid #2d4037; border-radius: 24px; box-shadow: 0 22px 70px #07100c99; }
+        img { width: 56px; height: 56px; border-radius: 16px; }
+        h1 { margin: 24px 0 10px; font-size: clamp(28px, 8vw, 42px); letter-spacing: -.04em; }
+        p { margin: 0 0 24px; color: #9eb2a8; line-height: 1.65; }
+        button { min-height: 46px; padding: 0 18px; color: #173024; background: #bce878; border: 0; border-radius: 13px; font: inherit; font-weight: 700; cursor: pointer; }
+    </style>
+</head>
+<body><main><img src="/static/app-icons/favicon.svg" alt=""><h1>Сейчас нет сети</h1><p>Финансовые данные не сохраняются для offline-просмотра. Подключитесь к интернету и попробуйте снова.</p><button type="button" onclick="location.reload()">Повторить</button></main></body>
+</html>

@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, current_app, render_template
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -40,4 +40,14 @@ def recurring():
 
 @pages_bp.get("/insights")
 def insights():
-    return render_template("insights.html", page="insights", title="Финансовые выводы")
+    return render_template("insights.html", page="insights", title="Аналитика")
+
+
+@pages_bp.get("/service-worker.js")
+def service_worker():
+    response = current_app.send_static_file("service-worker.js")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.mimetype = "application/javascript"
+    return response
