@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-intro"><div><p>Управляйте накопительными, валютными и инвестиционными счетами. Динамика капитала и сценарии теперь находятся в разделе «Аналитика».</p></div><div class="toolbar-actions"><a class="btn btn-secondary" href="/insights">Открыть аналитику</a><button class="btn btn-primary" data-open-transaction data-default-type="transfer"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Пополнить</button></div></div>
+<div class="page-actions"><button class="btn btn-primary" data-open-transaction data-default-type="transfer"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Пополнить</button></div>
 <div id="investmentAccounts" class="account-grid"><div class="card loading-state" role="status">Загружаем счета…</div></div>
-<article class="card chart-card"><div class="card-header"><div><div class="card-kicker">История</div><h3>Пополнения и начисления</h3></div></div><div id="investmentTransactions" class="transaction-list"><div class="loading-state" role="status">Загружаем историю…</div></div></article>
+<article class="card chart-card"><div class="card-header"><h3>Пополнения и начисления</h3></div><div id="investmentTransactions" class="transaction-list"><div class="loading-state" role="status">Загружаем историю…</div></div></article>
 {% endblock %}

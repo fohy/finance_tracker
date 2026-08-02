@@ -6,27 +6,17 @@
     <select class="person-filter" id="personFilter"><option value="">Все вместе</option></select>
 </div>
 
-<div class="hero-grid">
-    <article class="card balance-hero">
-        <div class="card-kicker">Баланс на жизнь</div>
-        <div class="hero-value" id="lifeBalance">—</div>
-        <div class="hero-meta"><span class="trend-chip">Актуальный остаток</span><span>доступно на основных счетах и наличными</span></div>
-        <div class="balance-split balance-split--summary">
-            <div><span>Инвестировано</span><strong id="investmentBalance">—</strong></div>
-            <div><span>Всего денег</span><strong id="totalCapital">—</strong></div>
-        </div>
-    </article>
-    <article class="card dashboard-shortcuts">
-        <div><div class="card-kicker">Быстрый доступ</div><h3>Что делаем сегодня?</h3><p>Главная оставлена спокойной и рабочей. Графики и финансовые выводы собраны в одном месте.</p></div>
-        <div class="shortcut-list">
-            <button class="btn btn-primary" type="button" data-open-transaction><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-plus"></use></svg>Добавить операцию</button>
-            <a class="btn btn-secondary" href="/insights"><svg aria-hidden="true"><use href="{{ asset_url('icons.svg') }}#icon-trend"></use></svg>Открыть аналитику</a>
-        </div>
-    </article>
-</div>
+<article class="card balance-hero dashboard-balance">
+    <div class="card-kicker">На жизнь</div>
+    <div class="hero-value" id="lifeBalance">—</div>
+    <div class="balance-split balance-split--summary">
+        <div><span>Инвестировано</span><strong id="investmentBalance">—</strong></div>
+        <div><span>Всего денег</span><strong id="totalCapital">—</strong></div>
+    </div>
+</article>
 
 <div class="dashboard-grid dashboard-grid--compact">
-    <article class="card category-card"><div class="card-header"><div><div class="card-kicker">Контроль лимитов</div><h3>Бюджеты категорий</h3></div><a href="/settings" class="text-link">Настроить</a></div><div id="budgetOverview" class="category-list"><div class="loading-state" role="status">Проверяем лимиты…</div></div></article>
-    <article class="card recent-card"><div class="card-header"><div><div class="card-kicker">Последние действия</div><h3>Операции за период</h3></div><a href="/transactions" class="text-link">Все операции</a></div><div id="recentTransactions" class="transaction-list"><div class="loading-state" role="status">Загружаем операции…</div></div></article>
+    <article class="card category-card"><div class="card-header"><h3>Бюджеты категорий</h3><a href="/settings" class="text-link">Настроить</a></div><div id="budgetOverview" class="category-list"><div class="loading-state" role="status">Проверяем лимиты…</div></div></article>
+    <article class="card recent-card"><div class="card-header"><h3>Операции за период</h3><a href="/transactions" class="text-link">Все операции</a></div><div id="recentTransactions" class="transaction-list"><div class="loading-state" role="status">Загружаем операции…</div></div></article>
 </div>
 {% endblock %}

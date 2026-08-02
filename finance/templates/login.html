@@ -20,16 +20,11 @@
                 <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
                 <div><strong>FinFlow</strong><span>личные финансы</span></div>
             </div>
-            <div class="login-story-copy">
-                <h1>Финансы<br><em>без лишнего.</em></h1>
-                <p>Доходы, расходы, цели и капитал в одном понятном обзоре.</p>
-            </div>
             <img class="login-illustration" src="{{ asset_url('illustrations/calm-growth.svg') }}" alt="" aria-hidden="true">
         </section>
         <section class="login-card" aria-labelledby="loginTitle">
             <div class="login-card-head">
                 <h2 id="loginTitle">Вход в FinFlow</h2>
-                <p>Введите данные своей учётной записи.</p>
             </div>
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% for category, message in messages %}
@@ -39,9 +34,9 @@
             <form method="post" class="login-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label for="login">Логин</label>
-                <input id="login" name="login" autocomplete="username" placeholder="Ваш логин" required autofocus>
+                <input id="login" name="login" autocomplete="username" required autofocus>
                 <label for="password">Пароль</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required>
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
                 <button class="btn btn-primary" type="submit">Войти</button>
             </form>
         </section>

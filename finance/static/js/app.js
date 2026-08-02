@@ -506,7 +506,7 @@
                     return groups;
                 }, new Map()).values()];
             review.classList.remove('hidden');
-            review.innerHTML = `<h3>Куда отнести эти товары?</h3><p>Для остальных позиций категории уже определены.</p>
+            review.innerHTML = `<h3>Уточните категории</h3>
                 <div class="receipt-review__items">${uncertainGroups.map((group, index) => `
                     <label><span><strong>${escapeHtml(group.name)}</strong><small>${group.items.length > 1 ? `${group.items.length} шт. · ` : ''}${money(group.amount)}</small></span>
                         <select data-receipt-item="${index}" required><option value="">Выберите категорию</option>${categoryOptions('expense')}</select>
@@ -917,21 +917,14 @@
         fields.forEach(field => {
             field.classList.add('entity-form__field');
             field.classList.toggle('entity-form__field--wide', Boolean(field.querySelector('textarea')));
-            field.classList.remove('entity-form__field--auto-wide');
         });
-        const regularFields = fields.filter(field =>
-            !field.classList.contains('hidden') && !field.querySelector('textarea')
-        );
-        if (regularFields.length % 2) {
-            regularFields.at(-1).classList.add('entity-form__field--auto-wide');
-        }
     }
 
     function openEntityForm(title, body, onSubmit) {
         const container = $('#entityModalContent');
         container.setAttribute('aria-labelledby', 'entityModalTitle');
         container.classList.add('entity-modal-card');
-        container.innerHTML = `<div class="modal-head entity-modal__header"><div><div class="eyebrow">Детали</div><h2 id="entityModalTitle">${escapeHtml(title)}</h2></div><button class="icon-btn" type="button" data-close-entity aria-label="Закрыть окно">${iconSvg('close')}</button></div><form id="entityForm" class="entity-form"><div class="entity-form__body"><div class="entity-form__fields">${body}</div></div><div class="modal-actions entity-form__actions"><button type="button" class="btn btn-ghost" data-close-entity>Отмена</button><button type="submit" class="btn btn-primary">Сохранить</button></div></form>`;
+        container.innerHTML = `<div class="modal-head entity-modal__header"><h2 id="entityModalTitle">${escapeHtml(title)}</h2><button class="icon-btn" type="button" data-close-entity aria-label="Закрыть окно">${iconSvg('close')}</button></div><form id="entityForm" class="entity-form"><div class="entity-form__body"><div class="entity-form__fields">${body}</div></div><div class="modal-actions entity-form__actions"><button type="button" class="btn btn-ghost" data-close-entity>Отмена</button><button type="submit" class="btn btn-primary">Сохранить</button></div></form>`;
         layoutEntityFormFields(container);
         $$('[data-close-entity]', container).forEach(btn => btn.addEventListener('click', closeModals));
         $('#entityForm', container).addEventListener('submit', async event => {
@@ -971,9 +964,9 @@
         const data = await api('/api/goals');
         const priorityLabels = { high: 'Высокий', medium: 'Средний', low: 'Низкий' };
         $('#goalsGrid').innerHTML = data.length ? data.map(item => `<article class="card entity-card">
-            <div class="entity-top"><div class="entity-title"><div class="card-kicker">Накопительная цель · ${escapeHtml(item.person_name || 'Общая')}</div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.note || 'Без заметки')}${item.account_name ? ` · счёт «${escapeHtml(item.account_name)}»` : ''}</p></div><span class="priority ${item.priority}">${priorityLabels[item.priority] || escapeHtml(item.priority)}</span></div>
+            <div class="entity-top"><div class="entity-title"><div class="card-kicker">${escapeHtml(item.person_name || 'Общая цель')}</div><h3>${escapeHtml(item.title)}</h3>${item.note || item.account_name ? `<p>${item.note ? escapeHtml(item.note) : ''}${item.note && item.account_name ? ' · ' : ''}${item.account_name ? `счёт «${escapeHtml(item.account_name)}»` : ''}</p>` : ''}</div><span class="priority ${item.priority}">${priorityLabels[item.priority] || escapeHtml(item.priority)}</span></div>
             <div class="entity-amount">${money(item.target_amount)}</div>
-            <div class="entity-progress"><div class="meta"><span>Достигнуто ${money(item.current_amount)}</span><span>${item.progress}%</span></div><div class="progress-track"><i style="width:${item.progress}%;background:var(--primary)"></i></div></div>
+            <div class="entity-progress"><div class="meta"><span>Накоплено ${money(item.current_amount)}</span><span>${item.progress}%</span></div><div class="progress-track"><i style="width:${item.progress}%;background:var(--primary)"></i></div></div>
             <div class="entity-stats"><div><span>Осталось</span><strong>${money(item.remaining)}</strong></div><div><span>Нужно в месяц</span><strong>${money(item.monthly_needed)}</strong></div><div><span>Срок</span><strong>${formatDate(item.target_date)}</strong></div><div><span>До цели</span><strong>${item.days_left} дн.</strong></div></div>
             <div class="entity-footer">${item.account_id ? '<span class="muted">Прогресс равен балансу связанного счёта</span>' : `<button class="btn btn-secondary" data-fund-goal="${item.id}" data-current="${item.current_amount}">Добавить прогресс</button>`}<button class="btn btn-ghost" data-delete-goal="${item.id}">Удалить</button></div>
         </article>`).join('') : '<div class="card empty-state">Создайте первую финансовую цель</div>';
@@ -1017,12 +1010,12 @@
         $('#peopleMetrics').innerHTML = data.length ? data.map(item => {
             const p = item.person, m = item.current;
             return `<article class="card person-card" style="--avatar:${escapeHtml(p.avatar_color)}">
-                <div class="person-head"><div class="big-avatar">${escapeHtml(p.name[0])}</div><div><h3>${escapeHtml(p.name)}</h3><span>Персональная статистика за период</span></div></div>
+                <div class="person-head"><div class="big-avatar">${escapeHtml(p.name[0])}</div><h3>${escapeHtml(p.name)}</h3></div>
                 <div class="person-metrics"><div><span>Доход</span><strong class="tx-amount income">${money(m.income)}</strong></div><div><span>Расход</span><strong class="tx-amount expense">${money(m.expense)}</strong></div><div><span>Инвестиции</span><strong class="tx-amount transfer">${money(m.invested)}</strong></div></div>
-                <div class="mini-score"><div><div class="card-kicker">Индекс действий</div><strong>${item.score.value}/100</strong></div><span class="priority ${item.score.tone === 'good' ? 'low' : item.score.tone === 'bad' ? 'high' : 'medium'}">${escapeHtml(item.score.label)}</span></div>
+                <div class="mini-score"><div><div class="card-kicker">Оценка периода</div><strong>${item.score.value}/100</strong></div><span class="priority ${item.score.tone === 'good' ? 'low' : item.score.tone === 'bad' ? 'high' : 'medium'}">${escapeHtml(item.score.label)}</span></div>
                 <div class="person-categories"><div class="card-kicker">Главные категории расходов</div>${item.breakdown.slice(0,4).map(cat => `<div class="category-name"><span class="category-label">${iconSvg(cat.icon)}${escapeHtml(cat.name)}</span><strong>${money(cat.amount)}</strong></div>`).join('') || '<div class="muted">Нет расходов</div>'}</div>
             </article>`;
-        }).join('') : '<div class="card empty-state">Персональная статистика появится после первых операций</div>';
+        }).join('') : '<div class="card empty-state">Данные появятся после первых операций</div>';
     }
 
     const accountTypeLabels = {
@@ -1082,7 +1075,7 @@
                 try {
                     await api('/api/settings', { method: 'PUT', body: Object.fromEntries(new FormData(form).entries()) });
                     await refreshBootstrap();
-                    toast('Настройки сохранены и применены ко всем разделам');
+                    toast('Настройки сохранены');
                     await loadCurrentPage();
                 }
                 catch (error) { toast(error.message, 'error'); }
@@ -1243,9 +1236,9 @@
         const cushion = insights.cushion;
         $('#cushionRunway').textContent = `${cushion.runway_months} мес. запаса`;
         $('#cushionDetails').innerHTML = `<div class="list-row"><span>Резерв</span><strong>${money(cushion.amount)}</strong></div><div class="list-row"><span>Средние траты в месяц</span><strong>${money(cushion.monthly_burn)}</strong></div><div class="list-row"><span>До цели 3 месяца</span><strong>${money(cushion.gap_3)}</strong></div><div class="list-row"><span>До цели 6 месяцев</span><strong>${money(cushion.gap_6)}</strong></div>`;
-        $('#anomalyList').innerHTML = insights.anomalies.length ? insights.anomalies.map(item => `<div class="list-row is-warning"><span>${escapeHtml(item.category_name)} · ${item.kind === 'large_transaction' ? 'крупная операция' : 'рост к среднему'}</span><strong>${money(item.amount || item.current_amount)}</strong></div>`).join('') : '<div class="empty-state">Материальных отклонений не найдено</div>';
+        $('#anomalyList').innerHTML = insights.anomalies.length ? insights.anomalies.map(item => `<div class="list-row is-warning"><span>${escapeHtml(item.category_name)} · ${item.kind === 'large_transaction' ? 'крупная операция' : 'рост к среднему'}</span><strong>${money(item.amount || item.current_amount)}</strong></div>`).join('') : '<div class="empty-state">Отклонений нет</div>';
         const weeklyMetric = (label, key) => `<div><span>${label} · ${report.deltas[key] >= 0 ? '+' : ''}${report.deltas[key]}% к прошлой</span><strong>${money(report.current_week[key])}</strong></div>`;
-        $('#weeklyReport').innerHTML = `<p class="muted">${formatDate(report.current_week.start)} — ${formatDate(report.current_week.end)}</p><div class="result-strip">${weeklyMetric('Доход', 'income')}${weeklyMetric('Расход', 'expense')}${weeklyMetric('Накоплено', 'saved')}${weeklyMetric('В валюту', 'currency_reserved')}</div><h3 class="section-title">Главные категории</h3><div class="compact-list">${report.top_categories.length ? report.top_categories.map(category => `<div class="list-row"><span>${escapeHtml(category.name || 'Без категории')}</span><strong>${money(category.amount)}</strong></div>`).join('') : '<div class="empty-state">Расходов на этой неделе нет</div>'}</div><h3 class="section-title">Три действия</h3><ol class="action-list">${report.actions.map(action => `<li>${escapeHtml(action)}</li>`).join('')}</ol>`;
+        $('#weeklyReport').innerHTML = `<p class="muted">${formatDate(report.current_week.start)} — ${formatDate(report.current_week.end)}</p><div class="result-strip">${weeklyMetric('Доход', 'income')}${weeklyMetric('Расход', 'expense')}${weeklyMetric('Накоплено', 'saved')}${weeklyMetric('В валюту', 'currency_reserved')}</div><h3 class="section-title">Главные категории</h3><div class="compact-list">${report.top_categories.length ? report.top_categories.map(category => `<div class="list-row"><span>${escapeHtml(category.name || 'Без категории')}</span><strong>${money(category.amount)}</strong></div>`).join('') : '<div class="empty-state">Расходов на этой неделе нет</div>'}</div><h3 class="section-title">Действия</h3><ol class="action-list">${report.actions.map(action => `<li>${escapeHtml(action)}</li>`).join('')}</ol>`;
         const form = $('#whatIfForm');
         if (!form.dataset.ready) {
             form.dataset.ready = '1';
