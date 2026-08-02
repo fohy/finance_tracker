@@ -97,7 +97,20 @@
                 item.setAttribute('aria-selected', String(index === select.selectedIndex));
                 item.disabled = option.disabled;
                 item.dataset.index = String(index);
-                item.textContent = option.textContent;
+                const account = select.name.includes('account_id')
+                    ? state.bootstrap?.accounts.find(entry => entry.id === Number(option.value))
+                    : null;
+                if (account) {
+                    item.classList.add('custom-select-option--account', accountTypeClass(account.account_type));
+                    const icon = document.createElement('span');
+                    icon.className = 'custom-select-option__icon';
+                    icon.innerHTML = iconSvg(accountTypeIcons[account.account_type] || 'account-checking');
+                    const text = document.createElement('span');
+                    text.textContent = option.textContent;
+                    item.append(icon, text);
+                } else {
+                    item.textContent = option.textContent;
+                }
                 item.addEventListener('click', () => {
                     select.selectedIndex = index;
                     select.dispatchEvent(new Event('input', { bubbles: true }));
@@ -637,19 +650,21 @@
     }
 
     function setupNavigation() {
-        const menuButton = $('#mobileMenu');
+        const menuButtons = [$('#mobileMenu'), ...$$('[data-sidebar-toggle]')].filter(Boolean);
         const sidebar = $('#sidebar');
+        const syncMenuButtons = isOpen => menuButtons.forEach(button => {
+            button.setAttribute('aria-expanded', String(isOpen));
+            button.setAttribute('aria-label', isOpen ? 'Закрыть меню' : 'Открыть меню');
+        });
         const closeSidebar = () => {
             sidebar?.classList.remove('open');
-            menuButton?.setAttribute('aria-expanded', 'false');
-            menuButton?.setAttribute('aria-label', 'Открыть меню');
+            syncMenuButtons(false);
         };
-        menuButton?.setAttribute('aria-expanded', 'false');
-        menuButton?.addEventListener('click', () => {
+        syncMenuButtons(false);
+        menuButtons.forEach(button => button.addEventListener('click', () => {
             const isOpen = sidebar?.classList.toggle('open') || false;
-            menuButton.setAttribute('aria-expanded', String(isOpen));
-            menuButton.setAttribute('aria-label', isOpen ? 'Закрыть меню' : 'Открыть меню');
-        });
+            syncMenuButtons(isOpen);
+        }));
         $('#sidebarBackdrop')?.addEventListener('click', closeSidebar);
         $$('.nav-item', sidebar).forEach(link => link.addEventListener('click', closeSidebar));
         $$('[data-period]').forEach(button => button.setAttribute('aria-pressed', String(button.classList.contains('active'))));
@@ -745,7 +760,10 @@
 
     function drawLineChart(container, rows, keys = ['income', 'expense', 'invested']) {
         if (!container) return;
+        container._chartInteractionController?.abort();
         if (!rows.length) {
+            container.removeAttribute('tabindex');
+            container.removeAttribute('role');
             container.innerHTML = '<div class="chart-empty">За выбранный период пока нет данных</div>';
             return;
         }
@@ -776,6 +794,7 @@
         }).join('');
         const chartId = ++chartSequence;
         const tones = { income: 'var(--green)', expense: 'var(--red)', invested: 'var(--purple)', capital: 'var(--green)' };
+        const seriesLabels = { income: 'Доходы', expense: 'Расходы', invested: 'Инвестиции', capital: 'Капитал' };
         const defs = series.map(key => `<linearGradient id="chart-fill-${chartId}-${key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".28"/><stop offset="1" stop-color="${tones[key] || 'var(--primary)'}" stop-opacity=".015"/></linearGradient>`).join('');
         const plots = series.map(key => {
             const line = path(key);
@@ -785,7 +804,83 @@
                 ? `<circle class="svg-point svg-point-${key}" cx="${x(index).toFixed(1)}" cy="${y(row[key]).toFixed(1)}" r="3.2"><title>${escapeHtml(String(row.label))}: ${money(row[key])}</title></circle>` : '').join('');
             return `<path class="svg-area" fill="url(#chart-fill-${chartId}-${key})" d="${area}"/><path class="svg-${key}" d="${line}"/>${points}`;
         }).join('');
-        container.innerHTML = `<svg class="svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="График динамики"><defs>${defs}</defs>${grid}${plots}${labels}</svg>`;
+        const selectionPoints = series.map(key => `<circle class="chart-selection-point chart-tone-${key}" data-selection-key="${key}" r="4.5"/>`).join('');
+        const chartLabel = `График: ${series.map(key => seriesLabels[key] || key).join(', ')}`;
+        container.innerHTML = `<svg class="svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><defs>${defs}</defs>${grid}${plots}<g class="chart-selection" aria-hidden="true"><line class="chart-selection-line" y1="${top}" y2="${height - bottom}"/>${selectionPoints}</g>${labels}</svg><div class="chart-tooltip" role="status" aria-live="polite" hidden></div><span class="sr-only">Используйте стрелки влево и вправо для просмотра значений графика. Escape закрывает подсказку.</span>`;
+
+        container.tabIndex = 0;
+        container.setAttribute('role', 'group');
+        container.setAttribute('aria-label', chartLabel);
+        container.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight Home End Escape');
+        const selection = $('.chart-selection', container);
+        const tooltip = $('.chart-tooltip', container);
+        let selectedIndex = rows.length - 1;
+        const detailLabel = row => /^\d{4}-\d{2}-\d{2}$/.test(String(row.label))
+            ? formatDate(row.label, { day: 'numeric', month: 'long', year: 'numeric' })
+            : String(row.label);
+        const showSelection = index => {
+            selectedIndex = Math.max(0, Math.min(rows.length - 1, index));
+            const row = rows[selectedIndex];
+            const xx = x(selectedIndex);
+            selection.classList.add('is-visible');
+            $('.chart-selection-line', selection).setAttribute('x1', xx.toFixed(1));
+            $('.chart-selection-line', selection).setAttribute('x2', xx.toFixed(1));
+            series.forEach(key => {
+                const point = $(`[data-selection-key="${key}"]`, selection);
+                point.setAttribute('cx', xx.toFixed(1));
+                point.setAttribute('cy', y(row[key]).toFixed(1));
+            });
+            const pointY = Math.min(...series.map(key => y(row[key])));
+            tooltip.hidden = false;
+            tooltip.dataset.placement = pointY < 96 ? 'below' : 'above';
+            tooltip.style.top = `${pointY / height * 100}%`;
+            tooltip.innerHTML = `<strong>${escapeHtml(detailLabel(row))}</strong>${series.map(key => `<span class="chart-tooltip__row chart-tone-${key}"><i></i><span>${seriesLabels[key] || escapeHtml(key)}</span><b>${money(row[key])}</b></span>`).join('')}`;
+            const tooltipHalf = tooltip.offsetWidth / 2;
+            const desiredLeft = xx / width * container.clientWidth;
+            tooltip.style.left = `${Math.max(tooltipHalf + 8, Math.min(container.clientWidth - tooltipHalf - 8, desiredLeft))}px`;
+        };
+        const hideSelection = () => {
+            selection.classList.remove('is-visible');
+            tooltip.hidden = true;
+        };
+        const indexFromPointer = event => {
+            const rect = container.getBoundingClientRect();
+            const plotLeft = rect.left + left / width * rect.width;
+            const plotWidth = (width - left - right) / width * rect.width;
+            const ratio = Math.max(0, Math.min(1, (event.clientX - plotLeft) / Math.max(1, plotWidth)));
+            return rows.length === 1 ? 0 : Math.round(ratio * (rows.length - 1));
+        };
+        const controller = new AbortController();
+        container._chartInteractionController = controller;
+        const options = { signal: controller.signal };
+        container.addEventListener('pointermove', event => {
+            if (event.pointerType === 'mouse') showSelection(indexFromPointer(event));
+        }, options);
+        container.addEventListener('pointerleave', hideSelection, options);
+        container.addEventListener('click', event => {
+            showSelection(indexFromPointer(event));
+            container.focus({ preventScroll: true });
+        }, options);
+        container.addEventListener('focus', () => showSelection(selectedIndex), options);
+        container.addEventListener('blur', hideSelection, options);
+        container.addEventListener('keydown', event => {
+            const next = {
+                ArrowLeft: selectedIndex - 1,
+                ArrowRight: selectedIndex + 1,
+                Home: 0,
+                End: rows.length - 1,
+            }[event.key];
+            if (next !== undefined) {
+                event.preventDefault();
+                showSelection(next);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                hideSelection();
+            }
+        }, options);
+        document.addEventListener('pointerdown', event => {
+            if (!container.contains(event.target)) hideSelection();
+        }, options);
     }
 
     async function loadDashboard() {
@@ -822,8 +917,7 @@
             const pct = total ? Number(item.amount) / total * 100 : 0;
             return `<div class="category-row" style="--cat-color:${escapeHtml(item.color)}">
                 <div class="category-icon">${iconSvg(item.icon)}</div>
-                <div><div class="category-name"><span>${escapeHtml(item.name)}</span><span>${pct.toFixed(0)}%</span></div><div class="progress-track"><i style="width:${pct}%"></i></div><div class="category-profile-meta">${item.transaction_count} ${pluralize(item.transaction_count, ['операция', 'операции', 'операций'])} · средний чек ${money(item.average_transaction)}</div></div>
-                <strong>${money(item.amount)}</strong>
+                <div class="category-main"><div class="category-heading"><span>${escapeHtml(item.name)}</span><span>${pct.toFixed(0)}%</span></div><strong class="category-amount">${money(item.amount)}</strong><div class="progress-track"><i style="width:${pct}%"></i></div><div class="category-profile-meta">${item.transaction_count} ${pluralize(item.transaction_count, ['операция', 'операции', 'операций'])} · средний чек ${money(item.average_transaction)}</div></div>
             </div>`;
         }).join('');
     }
@@ -953,7 +1047,7 @@
         ]);
         const investments = accounts.filter(a => ['savings', 'deposit', 'currency', 'investment'].includes(a.account_type) && a.is_active);
         const typeLabels = { savings: 'Накопительный', deposit: 'Вклад', currency: 'Валютный', investment: 'Инвестиционный' };
-        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card"><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3><strong>${account.account_type === 'currency' ? nativeMoney(account.balance, account.currency_code) : money(account.balance)}</strong><div class="account-meta">${account.account_type === 'currency' ? `<span>В основной валюте: ${money(account.base_equivalent)}</span><span>Курс: ${Number(account.exchange_rate).toFixed(4)}</span>` : `<span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span>`}</div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить счёт</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный, валютный или инвестиционный счёт в настройках</div>';
+        $('#investmentAccounts').innerHTML = investments.length ? investments.map(account => `<article class="card account-card ${accountTypeClass(account.account_type)}"><div class="account-card__head"><div class="account-card__icon">${iconSvg(accountTypeIcons[account.account_type] || 'account-checking')}</div><div><div class="card-kicker">${typeLabels[account.account_type] || 'Счёт'}</div><h3>${escapeHtml(account.name)}</h3></div></div><strong>${account.account_type === 'currency' ? nativeMoney(account.balance, account.currency_code) : money(account.balance)}</strong><div class="account-meta">${account.account_type === 'currency' ? `<span>В основной валюте: ${money(account.base_equivalent)}</span><span>Курс: ${Number(account.exchange_rate).toFixed(4)}</span>` : `<span>${Number(account.annual_rate).toFixed(2)}% годовых</span><span>${account.interest_enabled ? `выплата раз в месяц · проведено по ${formatDate(account.last_accrual_date)}` : 'автоначисление выключено'}</span>`}</div><button class="btn btn-ghost" type="button" data-configure-interest="${account.id}">${iconSvg('edit')}Настроить счёт</button></article>`).join('') : '<div class="card empty-state">Добавьте накопительный, валютный или инвестиционный счёт в настройках</div>';
         $('#investmentTransactions').innerHTML = tx.items.filter(item => ['transfer', 'interest'].includes(item.tx_type)).map(transactionRow).join('') || '<div class="empty-state">Пополнений пока нет</div>';
         $$('[data-configure-interest]').forEach(button => button.addEventListener('click', () => {
             openAccountForm(accounts.find(account => account.id === Number(button.dataset.configureInterest)));
@@ -1035,6 +1129,10 @@
         investment: 'account-investment',
     };
 
+    function accountTypeClass(accountType) {
+        return `account-type-${accountTypeIcons[accountType] ? accountType : 'checking'}`;
+    }
+
     function accountTypeOptions(selected = 'checking') {
         return Object.entries(accountTypeLabels)
             .map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`)
@@ -1098,7 +1196,7 @@
         }
         const accountList = $('#accountSettings');
         if (accountList) {
-            accountList.innerHTML = accounts.length ? accounts.map(account => `<article class="account-setting-row ${account.is_active ? '' : 'is-inactive'}">
+            accountList.innerHTML = accounts.length ? accounts.map(account => `<article class="account-setting-row ${accountTypeClass(account.account_type)} ${account.is_active ? '' : 'is-inactive'}">
                 <div class="account-setting-icon">${iconSvg(accountTypeIcons[account.account_type] || 'account-checking')}</div>
                 <div class="account-setting-main"><div><strong>${escapeHtml(account.name)}</strong><span>${accountTypeLabels[account.account_type] || 'Счёт'}${account.is_active ? '' : ' · отключён'}</span></div><b>${account.account_type === 'currency' ? `${nativeMoney(account.balance, account.currency_code)} · ${money(account.base_equivalent)}` : money(account.balance)}</b></div>
                 <div class="account-setting-meta"><span>${account.account_type === 'currency' ? `курс ${Number(account.exchange_rate).toFixed(4)}` : `${Number(account.annual_rate).toFixed(2)}% годовых`}</span></div>
